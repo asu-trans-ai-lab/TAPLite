@@ -5,6 +5,9 @@
 #include <omp.h>
 #define FLOAT_ACCURACY 1.0E-15
 
+
+
+
 #define NO_COSTPARAMETERS 4
 #define IVTT 0
 #define OVTT 1
@@ -19,11 +22,14 @@
 #define INVALID -1
 #define VALID(x) ((x)!=-1)
 
+#include <cstdio>
+
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <string>
 #include <vector>
+
 
 #include <map>
 typedef double cost_vector[NO_COSTPARAMETERS];
@@ -461,6 +467,10 @@ static void InitODflow(int input_no_zones);
 static void CloseODflow(void);
 /* End of local declarations. */
 
+void fopen_s(FILE** file, const char* fileName, const char* mode)
+{
+    *file = fopen(fileName, mode);
+}
 
 FILE* logfile;
 int shortest_path_log_flag = 0; 
@@ -602,7 +612,7 @@ void Assign(int Assignment_iteration_no, double** ODflow, int** MinPathPredLink,
 
 	//// Create a log file
 	//FILE* logfile_od;
-	//fopen_s(&logfile_od, "assignment_logfile_od.txt", "a+");
+	//fopen(&logfile_od, "assignment_logfile_od.txt", "a+");
 	//if (logfile_od == NULL) {
 	//	printf("Error opening file!\n");
 	//	return;
@@ -743,7 +753,7 @@ int get_number_of_links_from_link_file()
 }
 
 
-void main(int argc, char** argv) 
+int main(int argc, char** argv) 
 {
 	double * MainVolume, * SubVolume, * SDVolume, Lambda;
 	int** MinPathPredLink;
@@ -767,7 +777,7 @@ void main(int argc, char** argv)
 	fopen_s(&link_performance_file, "link_performance.csv", "w");
 	if (link_performance_file == NULL) {
 		printf("Error opening file!\n");
-		return;
+		return 0;
 	}
 	fclose(link_performance_file);
 
@@ -875,6 +885,7 @@ void main(int argc, char** argv)
 	fclose(link_performance_file);
 	fclose(logfile);  // Close the log file when you're done with it.
 
+	return 1;
 }
 
 
@@ -1790,7 +1801,7 @@ void Read_ODtable(double** ODtable, int no_zones)
 	double total_volume = 0;
 	// Read the data
 	int result;
-	while ((result = fscanf_s(file, "%d,%d,%lf", &o_zone_id, &d_zone_id, &volume)) != EOF)
+	while ((result = fscanf(file, "%d,%d,%lf", &o_zone_id, &d_zone_id, &volume)) != EOF)
 	{
 		if (result == 3) // we have read all the 3 values correctly
 		{
