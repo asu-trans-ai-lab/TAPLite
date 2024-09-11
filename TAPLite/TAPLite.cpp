@@ -587,10 +587,6 @@ double FindMinCostRoutes(int** MinPathPredLink)
 #pragma omp parallel for schedule(dynamic)
     for (Orig = 1; Orig <= no_zones; Orig++)
     {
-        // if(Orig%100==0)
-        //{
-        // printf("Searching minpath for origin %6d.", Orig);
-        // }
         Minpath(Orig, MinPathPredLink[Orig], CostTo[Orig]);
         if (RouteCost != NULL)
         {
@@ -601,15 +597,15 @@ double FindMinCostRoutes(int** MinPathPredLink)
                                 (double)CostTo[Orig][Dest], Orig, Dest);
 
                 RouteCost[Orig][Dest] = CostTo[Orig][Dest];
-                // #pragma omp critical
-                //				{
-                //				system_least_travel_time += RouteCost[Orig][Dest] *
-                //ODflow[Orig][Dest];
-                //				}
+                #pragma omp critical
+                {
+                	system_least_travel_time += RouteCost[Orig][Dest] * ODflow[Orig][Dest];
+                }
             }
         }
     }
-    free(CostTo);
+    // free(CostTo);
+	Free_2D((void**)CostTo, no_zones, no_nodes);
     StatusMessage("Minpath", "Found all minpath.");
     return system_least_travel_time;
 }
