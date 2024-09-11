@@ -557,31 +557,35 @@ Output:	RouteCost - route generalized cost, by origin and destination
 
 double  FindMinCostRoutes(int** MinPathPredLink) {
 	int Orig, Dest;
-	double* CostTo;
+	double** CostTo;
 	double system_least_travel_time = 0;
-	CostTo = (double*)Alloc_1D(no_nodes, sizeof(double));
+	CostTo = (double**)Alloc_2D(no_zones, no_nodes, sizeof(double));
 	StatusMessage("Minpath", "Starting the minpath calculations.");
 
 #pragma omp parallel for schedule(dynamic)
 	for (Orig = 1; Orig <= no_zones; Orig++)
 	{
-	//	StatusMessage("Minpath", "Searching minpath for origin %6d.", Orig);
-		Minpath(Orig, MinPathPredLink[Orig], CostTo);
+		//if(Orig%100==0)
+		//{
+		//printf("Searching minpath for origin %6d.", Orig);
+		//}
+		Minpath(Orig, MinPathPredLink[Orig], CostTo[Orig]);
 		if (RouteCost != NULL) {
 			for (Dest = 1; Dest <= no_zones; Dest++) {
-				if (CostTo[Dest] < 0.0)
+				if (CostTo[Orig][Dest] < 0.0)
 					ExitMessage("Negative cost %lg from Origin %d to Destination %d.",
-						(double)CostTo[Dest], Orig, Dest);
+						(double)CostTo[Orig][Dest], Orig, Dest);
 
-				RouteCost[Orig][Dest] = CostTo[Dest];
-#pragma omp critical
-				{
-				system_least_travel_time += RouteCost[Orig][Dest] * ODflow[Orig][Dest];
-				}
+				RouteCost[Orig][Dest] = CostTo[Orig][Dest];
+//#pragma omp critical
+//				{
+//				system_least_travel_time += RouteCost[Orig][Dest] * ODflow[Orig][Dest];
+//				}
 			}
 		}
 	}
-	free(CostTo);	StatusMessage("Minpath", "Found all minpath.");
+	free(CostTo);	
+	StatusMessage("Minpath", "Found all minpath.");
 	return system_least_travel_time;
 }
 
