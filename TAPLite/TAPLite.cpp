@@ -25,6 +25,13 @@
 
 #include <omp.h>
 
+#ifndef _win32
+void fopen_s(FILE** file, const char* fileName, const char* mode)
+{
+    *file = fopen(fileName, mode);
+}
+#endif
+
 typedef double cost_vector[NO_COSTPARAMETERS];
 
 struct link_record {
@@ -469,11 +476,6 @@ static void InitODflow(int input_no_zones);
 static void CloseODflow(void);
 /* End of local declarations. */
 
-void fopen_s(FILE** file, const char* fileName, const char* mode)
-{
-    *file = fopen(fileName, mode);
-}
-
 FILE* logfile;
 int shortest_path_log_flag = 0;
 
@@ -518,7 +520,7 @@ int Minpath(int Orig, int* PredLink, double* CostTo)
 
                 if (CostTo[NewNode] > NewCost)
                 {
-                    /* If the new lable is better than the old one, correct it, and make sure that
+                    /* If the new label is better than the old one, correct it, and make sure that
                      * the new node to the queue. */
 
                     CostTo[NewNode] = NewCost;
