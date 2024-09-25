@@ -13,6 +13,7 @@
 #define FABS(x) ((x) >= 0 ? (x) : (-x))
 
 #define INVALID -1
+
 #define VALID(x) ((x) != -1)
 
 #include <cstdio>
@@ -24,6 +25,8 @@
 #include <vector>
 
 #include <omp.h>
+
+#define MAX_MODE_TYPES  10
 
 //#ifndef _win32
 //void fopen_s(FILE** file, const char* fileName, const char* mode)
@@ -37,26 +40,50 @@ typedef double cost_vector[NO_COSTPARAMETERS];
 struct link_record {
     int internal_from_node_id;
     int internal_to_node_id;
-
+    int link_id;
     int external_from_node_id;
     int external_to_node_id;
 
-    double Capacity;
+    double Link_Capacity;
     double FreeTravelTime;
-    double B;
+    double VDF_Alpha;
     double BoverC;
-    double Power;
+    double VDF_Beta;
+    double VDF_plf;
     double Toll;
     double AdditionalCost;
     double Distance;
     double Speed;
-    //	int Type;
-    double Delay;
+    std::string allowed_uses;
+    int mode_allowed_use[MAX_MODE_TYPES];
+    double mode_MainVolume[MAX_MODE_TYPES];
+    double mode_SubVolume[MAX_MODE_TYPES];  //	
+
     double Travel_time;
     double GenCost;
     double GenCostDer;
     double Ref_volume;
+    link_record()
+    {
+        VDF_Alpha = 0.15;
+        VDF_Beta = 4;
+        VDF_plf = 1; 
+
+    
+    }
 };
+
+struct mode_type {
+    std::string mode_type;
+    float vot;
+    float pce;
+    float occ;
+    std::string demand_file;
+};
+
+
+mode_type g_mode_type_vector[MAX_MODE_TYPES];
+
 
 struct list_item {
     struct list_item* next_item;
@@ -425,6 +452,8 @@ double Link_GenCostDer(int k, double* Volume);
 void* Alloc_1D(int dim1, size_t size);
 void** Alloc_2D(int dim1, int dim2, size_t size);
 void Free_2D(void** Array, int dim1, int dim2);
+void*** Alloc_3D(int dim1, int dim2, int dim3, size_t size);
+void Free_3D(void*** Array, int dim1, int dim2, int dim3);
 
 /* LINK VECTOR FUNCTIONS */
 void ClearVolume(double* VolumeArray);
@@ -445,9 +474,9 @@ double OF_LinksDirectionalDerivative(double* MainVolume, double* SDVolume, doubl
 void InitLinks(void);
 void CloseLinks(void);
 
-double** Read_ODflow(double* TotalODflow, int* no_zones);
+void Read_ODflow(double* TotalODflow, int* no_modes, int* no_zones);
 
-int Minpath(int Orig, int* PredLink, double* Cost_to);
+int Minpath(int m, int Orig, int* PredLink, double* Cost_to);
 double FindMinCostRoutes(int** MinPathPredLink);
 void Assign(double** ODflow, int** MinPathPredLink, double* Volume);
 
@@ -461,18 +490,25 @@ void ls_report(FILE* fp);
 void StatusMessage(const char* group, const char* format, ...);
 void ExitMessage(const char* format, ...);
 
-int no_zones, no_nodes, no_links, FirstThruNode;
-int AssignIterations;
+
 /* Gloabal variables */
 
-double** ODflow, TotalODflow;
-double** RouteCost;
+int no_zones, no_modes, no_nodes, no_links, FirstThruNode;
+int AssignIterations = 20;
+int demand_period_starting_hours = 7;
+int	demand_period_ending_hours = 8;
 
+
+double** ODflow, TotalODflow;
+
+
+double*** MDODflow;
+double*** MDRouteCost;
 /* Local Declarations */
 /* void FW(void); Should there be a function for fw, or should it be included in main? */
-static void Init(int input_no_zones);
+static void Init(int input_no_modes,int input_no_zones);
 static void Close();
-static void InitODflow(int input_no_zones);
+static void InitODflow(int input_no_modes,int input_no_zones);
 static void CloseODflow(void);
 /* End of local declarations. */
 
@@ -482,9 +518,10 @@ int shortest_path_log_flag = 0;
 FILE* link_performance_file;
 
 #define INVALID -1      /* Represents an invalid value. */
+#define BIGM 9999999      /* Represents an invalid value. */
 #define WAS_IN_QUEUE -7 /* Shows that the node was in the queue before. (7 is for luck.) */
 
-int Minpath(int Orig, int* PredLink, double* CostTo)
+int Minpath(int mode, int Orig, int* PredLink, double* CostTo)
 {
     int node, now, NewNode, k, Return2Q_Count = 0;
     double NewCost;
@@ -496,7 +533,7 @@ int Minpath(int Orig, int* PredLink, double* CostTo)
     for (node = 1; node <= no_nodes; node++)
     {
         QueueNext[node] = INVALID;
-        CostTo[node] = 1.0e+15;
+        CostTo[node] = BIGM;
         PredLink[node] = INVALID;
     }
 
@@ -509,10 +546,13 @@ int Minpath(int Orig, int* PredLink, double* CostTo)
 
     while ((now != INVALID) && (now != WAS_IN_QUEUE))
     {
-        if (now >= FirstThruNode || now == Orig)
+        if (now >= FirstThruNode || now == Orig)  // this is the key implementation for FirstThruNode on connector
         {
             for (k = FirstLinkFrom[now]; k <= LastLinkFrom[now]; k++)
             {
+
+                if (Link[k].mode_allowed_use[mode] == 0)  // implementation for allowed uses 
+                    continue; 
                 /* For every link that terminate at "now": */
 
                 NewNode = Link[k].internal_to_node_id;
@@ -578,35 +618,49 @@ Input: 	None
 Output:	RouteCost - route generalized cost, by origin and destination
         MinPathSuccLink - trees of minimum cost routes, by destination and node. */
 
-double FindMinCostRoutes(int** MinPathPredLink)
+double FindMinCostRoutes(int*** MinPathPredLink)
 {
-    int Orig, Dest;
+
     double** CostTo;
-    double system_least_travel_time = 0;
+
     CostTo = (double**)Alloc_2D(no_zones, no_nodes, sizeof(double));
     StatusMessage("Minpath", "Starting the minpath calculations.");
     double* system_least_travel_time_org_zone = (double*)Alloc_1D(no_zones, sizeof(double));
-//#pragma omp parallel for schedule(dynamic)
-    for (Orig = 1; Orig <= no_zones; Orig++)
+
+#pragma omp for
+    for (int Orig = 1; Orig <= no_zones; Orig++)
     {
+        for(int m = 1; m <= no_modes; m++)
+        {
         system_least_travel_time_org_zone[Orig] = 0;
 
-        Minpath(Orig, MinPathPredLink[Orig], CostTo[Orig]);
-        if (RouteCost != NULL)
+        Minpath(m, Orig, MinPathPredLink[m][Orig], CostTo[Orig]);
+        if (MDRouteCost != NULL)
         {
-            for (Dest = 1; Dest <= no_zones; Dest++)
+            for (int Dest = 1; Dest <= no_zones; Dest++)
             {
+                 MDRouteCost[m][Orig][Dest] = BIGM; // initialization 
+
                 if (CostTo[Orig][Dest] < 0.0)
                     ExitMessage("Negative cost %lg from Origin %d to Destination %d.",
                         (double)CostTo[Orig][Dest], Orig, Dest);
 
-                RouteCost[Orig][Dest] = CostTo[Orig][Dest];
-                    system_least_travel_time_org_zone[Orig] += RouteCost[Orig][Dest] * ODflow[Orig][Dest];
+                if (CostTo[Orig][Dest] <= BIGM - 1)  // feasible cost 
+                {
+                    MDRouteCost[m][Orig][Dest] = CostTo[Orig][Dest];
+                    system_least_travel_time_org_zone[Orig] += MDRouteCost[m][Orig][Dest] * MDODflow[m][Orig][Dest];
+                }
+                else
+                {
+                    int debug_flag = 1; 
+                }
             }
+        }
         }
     }
 
-    for (Orig = 1; Orig <= no_zones; Orig++)
+    double system_least_travel_time = 0;
+    for (int Orig = 1; Orig <= no_zones; Orig++)
     {
         system_least_travel_time+=system_least_travel_time_org_zone[Orig];
     }
@@ -621,7 +675,7 @@ double FindMinCostRoutes(int** MinPathPredLink)
 
 /* Assign OD flows to links according to the routes in MinPathPredLink. */
 
-void Assign(int Assignment_iteration_no, double** ODflow, int** MinPathPredLink, double* Volume)
+void Assign(int Assignment_iteration_no, double*** ODflow, int*** MinPathPredLink, double* Volume)
 {
     int Dest, Orig, k;
     int CurrentNode;
@@ -636,10 +690,15 @@ void Assign(int Assignment_iteration_no, double** ODflow, int** MinPathPredLink,
     // }
 
     for (k = 1; k <= no_links; k++)
+    {
         Volume[k] = 0.0;
 
-    StatusMessage("Assign", "Starting assign.");
-
+        for (int m = 1; m <= no_modes; m++)
+            Link[k].mode_SubVolume[m] = 0.0;
+    }
+    //StatusMessage("Assign", "Starting assign.");
+    for(int m = 1; m <= no_modes; m++)
+    { 
     for (Orig = 1; Orig <= no_zones; Orig++)
     {
         //	printf("Assign", "Assigning origin %6d.", Orig);
@@ -648,9 +707,13 @@ void Assign(int Assignment_iteration_no, double** ODflow, int** MinPathPredLink,
             if (Dest == Orig)
                 continue;
 
-            RouteFlow = ODflow[Orig][Dest];
+            RouteFlow = MDODflow[m][Orig][Dest];
             if (RouteFlow == 0)
                 continue;
+
+            if (MDRouteCost[m][Orig][Dest] >= BIGM - 1)  // if feasible 
+                continue; 
+
             CurrentNode = Dest;
             double total_travel_time = 0;
             double total_distance = 0;
@@ -658,14 +721,15 @@ void Assign(int Assignment_iteration_no, double** ODflow, int** MinPathPredLink,
 
             while (CurrentNode != Orig)
             {
-                k = MinPathPredLink[Orig][CurrentNode];
+                k = MinPathPredLink[m][Orig][CurrentNode];
                 if (k == INVALID)
                 {
-                    // Warning("A problem in mincostroutes.c (Assign): Invalid pred for node %d Orig
-                    // %d \n\n", CurrentNode, Orig);
+                    printf("A problem in mincostroutes.c (Assign): Invalid pred for node %d Orig%d \n\n", CurrentNode, Orig);
                     break;
                 }
-                Volume[k] += RouteFlow;
+                Volume[k] += RouteFlow * g_mode_type_vector[m].pce;
+                Link[k].mode_SubVolume[m]+= RouteFlow;  // pure volume 
+
                 CurrentNode = Link[k].internal_from_node_id;
 
                 total_travel_time += Link[k].Travel_time;
@@ -689,6 +753,7 @@ void Assign(int Assignment_iteration_no, double** ODflow, int** MinPathPredLink,
             // %f,FFTT:%f \n", Orig, Dest, RouteFlow, 	total_travel_time, total_distance,
             //total_FFTT);
         }
+    }
     }
 
     /*	fclose(logfile_od)*/;
@@ -721,7 +786,7 @@ int get_number_of_nodes_from_node_file(int& number_of_zones, int& l_FirstThruNod
                 number_of_zones = zone_id;
 
             if (zone_id == 0 && l_FirstThruNode == 1 /* not initialized*/)
-                l_FirstThruNode = node_id;
+                l_FirstThruNode = number_of_nodes + 1;  //use sequential node id
 
             number_of_nodes++;
         }
@@ -758,25 +823,83 @@ int get_number_of_links_from_link_file()
     return number_of_links;
 }
 
+
+void read_settings_file()
+{
+
+    CDTACSVParser parser_settings;
+
+    if (parser_settings.OpenCSVFile("settings.csv", true))
+    {
+        while (parser_settings.ReadRecord())  // if this line contains [] mark, then we will also read
+            // field headers.
+        {
+
+            parser_settings.GetValueByFieldName("number_of_iterations", AssignIterations);
+            parser_settings.GetValueByFieldName("demand_period_starting_hours", demand_period_starting_hours);
+            parser_settings.GetValueByFieldName("demand_period_ending_hours", demand_period_ending_hours);
+         	
+
+        }
+
+        parser_settings.CloseCSVFile();
+    }
+
+    return;
+}
+
+
+void read_mode_type_file()
+{
+
+    CDTACSVParser parser_mode_type;
+
+    if (parser_mode_type.OpenCSVFile("mode_type.csv", true))
+    {
+
+        no_modes = 0;
+        while (parser_mode_type.ReadRecord())  // if this line contains [] mark, then we will also read
+            // field headers.
+        {
+            no_modes += 1;
+            if(no_modes < MAX_MODE_TYPES)
+            {
+            parser_mode_type.GetValueByFieldName("mode_type", g_mode_type_vector[no_modes].mode_type);
+            parser_mode_type.GetValueByFieldName("vot", g_mode_type_vector[no_modes].vot);
+            parser_mode_type.GetValueByFieldName("pce", g_mode_type_vector[no_modes].pce);
+            parser_mode_type.GetValueByFieldName("occ", g_mode_type_vector[no_modes].occ);
+            parser_mode_type.GetValueByFieldName("demand_file", g_mode_type_vector[no_modes].demand_file);
+            }
+
+        }
+
+        parser_mode_type.CloseCSVFile();
+    }
+
+    if (no_modes == 0)  //default 
+    {
+        g_mode_type_vector[1].demand_file = "demand.csv";
+        g_mode_type_vector[1].mode_type = "auto";
+        g_mode_type_vector[1].vot = 10;
+        g_mode_type_vector[1].pce = 1;
+        g_mode_type_vector[1].occ = 1;
+        no_modes = 1;
+    }
+    return;
+}
+
 int main(int argc, char** argv)
 {
     double* MainVolume, * SubVolume, * SDVolume, Lambda;
-    int** MinPathPredLink;
+    int*** MDMinPathPredLink;
 
-    ////StatusMessage("General", "Ready, set, go...");
-    // switch (argc) {
-    // case 2: 	tuiFileName = argv[1];
-    //	break;
-    ////case 1:		tuiFileName = "control.tui";
-    ////	break;
-    // default:	ExitMessage("Wrong number of command line arguments (%d). \n"
-    //	"Syntax: fw <text user interface file>.", argc - 1);
-    // }
+    read_settings_file();
+    read_mode_type_file();
 
     no_nodes = get_number_of_nodes_from_node_file(no_zones, FirstThruNode);
     no_links = get_number_of_links_from_link_file();
 
-    printf("no_nodes= %d, no_zones = %d, FirstThruNode = %d, no_links = %d\n", no_nodes, no_zones,
+    printf("no_nodes= %d, no_zones = %d, FirstThruNode (seq No) = %d, no_links = %d\n", no_nodes, no_zones,
         FirstThruNode, no_links);
 
     fopen_s(&link_performance_file, "link_performance.csv", "w");
@@ -788,123 +911,145 @@ int main(int argc, char** argv)
     fclose(link_performance_file);
 
     fopen_s(&link_performance_file, "link_performance.csv", "a+");
-
-    AssignIterations = 20;
     fopen_s(&logfile, "TAP_log.csv", "w");  // Open the log file for writing.
 
     double system_wide_travel_time = 0;
     double system_least_travel_time = 0;
 
-    fprintf(logfile,
-        "iteration_no,link_id,internal_from_node_id,internal_to_node_id,volume,capacity,voc,"
-        "fftt,travel_time,delay\n");
+    //fprintf(logfile,
+    //    "iteration_no,link_id,internal_from_node_id,internal_to_node_id,volume,capacity,voc,"
+    //    "fftt,travel_time,delay\n");
 
-    Init(no_zones);
+
+
+    Init(no_modes, no_zones);
     int iteration_no = 0;
     MainVolume = (double*)Alloc_1D(no_links, sizeof(double));
     SDVolume = SubVolume = (double*)Alloc_1D(
         no_links, sizeof(double)); /* Compute search direction and sub-volume in the same place. */
-    MinPathPredLink = (int**)Alloc_2D(no_zones, no_nodes, sizeof(int));
+    MDMinPathPredLink = (int***)Alloc_3D(no_modes,no_zones, no_nodes, sizeof(int));
 
     // InitFWstatus(&fw_status);
     system_wide_travel_time = UpdateLinkCost(MainVolume);  // set up the cost first using FFTT
 
     fprintf(link_performance_file,
         "iteration_no,link_id,internal_from_node_id,internal_to_node_id,volume,ref_volume,"
-        "capacity,voc,fftt,travel_time,delay\n");
+        "capacity,voc,fftt,travel_time,VDF_alpha,VDF_beta,VDF_plf,speed,VMT,VHT,PMT,PHT,");
 
-    //for (int k = 1; k <= no_links; k++)
-    //{
-    //    fprintf(link_performance_file, "%d,%d,%d,%d,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf\n",
-    //        iteration_no, k, Link[k].external_from_node_id, Link[k].external_to_node_id,
-    //        MainVolume[k], Link[k].Capacity, MainVolume[k] / fmax(0.01, Link[k].Capacity),
-    //        Link[k].FreeTravelTime, Link[k].Travel_time,
-    //        Link[k].Travel_time - Link[k].FreeTravelTime);
-    //}
+    for (int m = 1; m <= no_modes; m++)
+        fprintf(link_performance_file, "mod_vol_%s,", g_mode_type_vector[m].mode_type.c_str());
 
-    system_least_travel_time = FindMinCostRoutes(MinPathPredLink);
-    Assign(iteration_no, ODflow, MinPathPredLink, MainVolume);
+
+    fprintf(link_performance_file, "\n"); 
+
+    system_least_travel_time = FindMinCostRoutes(MDMinPathPredLink);
+    Assign(iteration_no, MDODflow, MDMinPathPredLink, MainVolume);
+
+    for (int k = 1; k <= no_links; k++)
+    {
+        for(int m =1; m <= no_modes; m++)
+        {
+        Link[k].mode_MainVolume[m] = Link[k].mode_SubVolume[m];
+        }
+    }
     // FirstFWstatus(MainVolume, &fw_status);
     system_wide_travel_time = UpdateLinkCost(MainVolume);
     double gap = (system_wide_travel_time - system_least_travel_time) /
         (fmax(0.1, system_least_travel_time)) * 100;
 
+    if (gap < 0)
+    {
+        int ii = 0;
+    }
+
     printf("iter No = %d, sys. TT =  %lf, least TT =  %lf, gap = %f\n", iteration_no,
         system_wide_travel_time, system_least_travel_time, gap);
 
-    //for (int k = 1; k <= no_links; k++)
-    //{
-    //    fprintf(logfile, "%d,%d,%d,%d,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf\n", iteration_no, k,
-    //        Link[k].external_from_node_id, Link[k].external_to_node_id, MainVolume[k],
-    //        Link[k].Ref_volume, Link[k].Capacity, MainVolume[k] / fmax(0.01, Link[k].Capacity),
-    //        Link[k].FreeTravelTime, Link[k].Travel_time,
-    //        Link[k].Travel_time - Link[k].FreeTravelTime);
-    //}
 
-    // for (int k = 1; k <= no_links; k++)
-    //{
-    //	fprintf(link_performance_file, "%d,%d,%d,%d,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf\n", iteration_no,
-    //k, Link[k].internal_from_node_id, Link[k].internal_to_node_id, MainVolume[k],
-    //Link[k].Capacity, Link[k].FreeTravelTime, Link[k].Travel_time, Link[k].Travel_time -
-    //Link[k].FreeTravelTime);
-    // }
+
 
     for (iteration_no = 1; iteration_no < AssignIterations; iteration_no++)
     {
-        system_least_travel_time = FindMinCostRoutes(MinPathPredLink);
-        Assign(iteration_no, ODflow, MinPathPredLink, SubVolume);
+        system_least_travel_time = FindMinCostRoutes(MDMinPathPredLink);  // the one right before the assignment iteration 
+
+        Assign(iteration_no, MDODflow, MDMinPathPredLink, SubVolume);
         VolumeDifference(SubVolume, MainVolume, SDVolume); /* Which yields the search direction. */
         Lambda = LinksSDLineSearch(MainVolume, SDVolume);
 
         // MSA options
-        Lambda = 1.0 / (iteration_no + 1);
+     //   Lambda = 1.0 / (iteration_no + 1);
         // UpdateFWstatus(MainVolume, SDVolume, &fw_status);
+
+
+
+ 
+
         UpdateVolume(MainVolume, SDVolume, Lambda);
         system_wide_travel_time = UpdateLinkCost(MainVolume);
 
+        //system_least_travel_time = FindMinCostRoutes(MinPathPredLink);  // the one right after the updated link cost 
+
         gap = (system_wide_travel_time - system_least_travel_time) /
             (fmax(0.1, system_least_travel_time)) * 100;
+
+
+        if (gap < 0)
+        {
+            int ii = 0;
+        }
+
         printf("iter No = %d, Lambda = %f, sys. TT =  %lf, least TT =  %lf, gap = %f\n",
             iteration_no, Lambda, system_wide_travel_time, system_least_travel_time, gap);
 
-        for (int k = 1; k <= no_links; k++)
-        {
-            fprintf(logfile, "%d,%d,%d,%d,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf\n",
-                iteration_no, k, Link[k].external_from_node_id, Link[k].external_to_node_id,
-                MainVolume[k], Link[k].Ref_volume, Link[k].Capacity,
-                MainVolume[k] / fmax(0.01, Link[k].Capacity), Link[k].FreeTravelTime,
-                Link[k].Travel_time, Link[k].Travel_time - Link[k].FreeTravelTime);
-        }
-
         //for (int k = 1; k <= no_links; k++)
         //{
-        //    fprintf(link_performance_file, "%d,%d,%d,%d,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf\n",
+        //    fprintf(logfile, "%d,%d,%d,%d,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf\n",
         //        iteration_no, k, Link[k].external_from_node_id, Link[k].external_to_node_id,
-        //        MainVolume[k], Link[k].Ref_volume, Link[k].Capacity, MainVolume[k] / fmax(0.01, Link[k].Capacity), Link[k].FreeTravelTime,
+        //        MainVolume[k], Link[k].Ref_volume, Link[k].Capacity,
+        //        MainVolume[k] / fmax(0.01, Link[k].Capacity), Link[k].FreeTravelTime,
         //        Link[k].Travel_time, Link[k].Travel_time - Link[k].FreeTravelTime);
         //}
+
+
     }
+
+    //for (int k = 1; k <= no_links; k++)
+    //{
+    //    fprintf(logfile, "%d,%d,%d,%d,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf\n", iteration_no, k,
+    //        Link[k].external_from_node_id, Link[k].external_to_node_id, MainVolume[k],
+    //        Link[k].Capacity, MainVolume[k] / fmax(0.01, Link[k].Capacity),
+    //        Link[k].FreeTravelTime, Link[k].Travel_time,
+    //        Link[k].Travel_time - Link[k].FreeTravelTime);
+    //}
 
     for (int k = 1; k <= no_links; k++)
     {
-        fprintf(logfile, "%d,%d,%d,%d,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf\n", iteration_no, k,
-            Link[k].external_from_node_id, Link[k].external_to_node_id, MainVolume[k],
-            Link[k].Capacity, MainVolume[k] / fmax(0.01, Link[k].Capacity),
-            Link[k].FreeTravelTime, Link[k].Travel_time,
-            Link[k].Travel_time - Link[k].FreeTravelTime);
-    }
+        fprintf(link_performance_file, "%d,%d,%d,%d,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf,",
+            iteration_no, Link[k].link_id, Link[k].external_from_node_id, Link[k].external_to_node_id,
+            MainVolume[k], Link[k].Ref_volume, Link[k].Link_Capacity, MainVolume[k] / fmax(0.01, Link[k].Link_Capacity), Link[k].FreeTravelTime,
+            Link[k].Travel_time, Link[k].VDF_Alpha, Link[k].VDF_Beta, Link[k].VDF_plf, Link[k].Distance/fmax(Link[k].Travel_time/60.0, 0.001), Link[k].Travel_time - Link[k].FreeTravelTime);
+   
+        double VMT, VHT, PMT, PHT;
+        VMT = 0; VHT = 0;  PMT = 0; PHT = 0;
+        for (int m = 1; m <= no_modes; m++)
+        {
+            VMT += MainVolume[k] * Link[k].Distance;
+            VHT += MainVolume[k] * Link[k].Travel_time / 60.0;
+            PMT += Link[k].mode_MainVolume[m]*g_mode_type_vector[m].occ * Link[k].Distance;
+            PHT += Link[k].mode_MainVolume[m] * g_mode_type_vector[m].occ * Link[k].Travel_time / 60.0;
 
-    for (int k = 1; k <= no_links; k++)
-    {
-        fprintf(link_performance_file, "%d,%d,%d,%d,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf\n",
-            iteration_no, k, Link[k].external_from_node_id, Link[k].external_to_node_id,
-            MainVolume[k], Link[k].Ref_volume, Link[k].Capacity, MainVolume[k] / fmax(0.01, Link[k].Capacity), Link[k].FreeTravelTime,
-            Link[k].Travel_time, Link[k].Travel_time - Link[k].FreeTravelTime);
+        }
+        fprintf(link_performance_file, "%2lf,%2lf,%2lf,%2lf,", VMT, VHT, PMT, PHT);
+
+        for (int m = 1; m <= no_modes; m++)
+            fprintf(link_performance_file, "%2lf,",Link[k].mode_MainVolume[m]);
+
+       fprintf(link_performance_file, "\n"); 
     }
 
     free(MainVolume);
     free(SubVolume);
-    Free_2D((void**)MinPathPredLink, no_zones, no_nodes);
+    Free_3D((void***)MDMinPathPredLink, no_modes, no_zones, no_nodes);
 
     Close();
 
@@ -914,11 +1059,11 @@ int main(int argc, char** argv)
     return 0;
 }
 
-static void Init(int input_no_zones)
+static void Init(int int_no_modes, int input_no_zones)
 {
     // tuiInit(tuiFileName);
     InitLinks();
-    InitODflow(input_no_zones);
+    InitODflow(int_no_modes, input_no_zones);
     InitLineSearch();
 }
 
@@ -931,20 +1076,23 @@ static void Close()
     CloseLineSearch();
 }
 
-static void InitODflow(int input_no_zones)
+static void InitODflow(int int_no_modes, int input_no_zones)
 {
-    char ODflowFileName[15];
 
     double Factor = 1.0;
 
     // tuiGetInputFileName("OD flow file name", TRUE, ODflowFileName);
     StatusMessage("General", "Reading OD flow file");
-    ODflow = Read_ODflow(&TotalODflow, &input_no_zones);
+    Read_ODflow(&TotalODflow, &int_no_modes, &input_no_zones);
 }
 
 static void CloseODflow(void)
 {
-    Free_2D((void**)ODflow, no_zones, no_zones);
+
+
+    Free_3D((void***)MDODflow, no_modes, no_zones, no_zones);
+    Free_3D((void***)MDRouteCost, no_modes, no_zones, no_zones);
+
 }
 
 void* Alloc_1D(int dim1, size_t size)
@@ -995,31 +1143,94 @@ void Free_2D(void** Array, int dim1, int dim2)
     free(Array);
 }
 
+void*** Alloc_3D(int dim1, int dim2, int dim3, size_t size)
+{
+    void*** Array; // This is the pointer to the 3D array
+    int i, j;
+
+    // Allocate memory for the 1D array of pointers to 2D arrays
+    Array = (void***)calloc(dim1 + 1, sizeof(void**));
+    if (Array == NULL)
+    {
+        ExitMessage("Can not allocate memory for three-dimensional array of size %d by %d by %d. \n", dim1, dim2, dim3);
+    }
+
+    // Loop through each of the 2D arrays
+    for (i = 1; i <= dim1; i++)
+    {
+        // Allocate memory for each 2D array (which is a 1D array of pointers to 1D arrays)
+        Array[i] = (void**)calloc(dim2 + 1, sizeof(void*));
+        if (Array[i] == NULL)
+        {
+            ExitMessage("Can not allocate memory for two-dimensional array of size %d by %d. \n", dim1, dim2);
+        }
+
+        // Loop through each of the 1D arrays inside the 2D arrays
+        for (j = 1; j <= dim2; j++)
+        {
+            // Allocate memory for each 1D array of size dim3
+            Array[i][j] = (void*)calloc(dim3 + 1, size);
+            if (Array[i][j] == NULL)
+            {
+                ExitMessage("Can not allocate memory for one-dimensional array of size %d. \n", dim3);
+            }
+        }
+    }
+
+    return Array;
+}
+
+
+void Free_3D(void*** Array, int dim1, int dim2, int dim3)
+{
+    int i, j;
+    void* p;
+
+    // Free the innermost arrays (1D arrays)
+    for (i = 1; i <= dim1; i++)
+    {
+        for (j = 1; j < dim2; j++)
+        {
+            p = Array[i][j];
+            free(p);
+        }
+        // Free the 2D array (array of pointers to 1D arrays)
+        free(Array[i]);
+    }
+
+    // Free the outermost array (array of pointers to 2D arrays)
+    free(Array);
+}
+
 /* Internal functions */
 
-double Link_Delay(int k, double* Volume)
+double Link_Travel_Time(int k, double* Volume)
 {
+    double IncomingDemand = Volume[k]/fmax(0.001, demand_period_ending_hours - demand_period_starting_hours)/ Link[k].VDF_plf;
+
     Link[k].Travel_time =
-        Link[k].FreeTravelTime * (1.0 + Link[k].BoverC * (pow(Volume[k], Link[k].Power)));
-    return (Link[k].FreeTravelTime * (1.0 + Link[k].BoverC * (pow(Volume[k], Link[k].Power))));
+        Link[k].FreeTravelTime * (1.0 + Link[k].VDF_Alpha * (pow(IncomingDemand / fmax(0.1,Link[k].Link_Capacity), Link[k].VDF_Beta)));
+    return (Link[k].Travel_time);
 }
 
-double LinkDelay_Integral(int k, double* Volume)
+double Link_Travel_Time_Integral(int k, double* Volume)
 {
-    if (Link[k].Power >= 0.0)
-        return (Volume[k] * Link[k].FreeTravelTime *
-            (1.0 + (Link[k].BoverC / (Link[k].Power + 1)) * pow(Volume[k], Link[k].Power)));
+    double IncomingDemand = Volume[k] / fmax(0.001, demand_period_ending_hours - demand_period_starting_hours) / Link[k].VDF_plf;
+
+    if (Link[k].VDF_Beta >= 0.0)
+               return (Volume[k] * Link[k].FreeTravelTime *
+                (1.0 + (Link[k].BoverC / (Link[k].VDF_Beta + 1)) * pow(IncomingDemand, Link[k].VDF_Beta + 1)));
     else
         return 0.0;
 }
 
-double Link_Delay_Der(int k, double* Volume)
+double Link_Travel_Time_Der(int k, double* Volume)
 {
-    if (Link[k].Power == 0.0)
+    if (Link[k].VDF_Beta == 0.0)
         return 0.0;
     else
-        return (Link[k].FreeTravelTime * Link[k].BoverC * Link[k].Power *
-            pow(Volume[k], (Link[k].Power - 1)));
+        return (Link[k].FreeTravelTime * Link[k].BoverC * Link[k].VDF_Beta *
+            pow(Volume[k], (Link[k].VDF_Beta - 1)));
 }
 
 double AdditionalCost(int k)
@@ -1034,18 +1245,18 @@ double AdditionalCost(int k)
 
 double Link_GenCost(int k, double* Volume)
 {
-    //	return (Link[k].AdditionalCost + Link_Delay(k, Volume));
-    return (Link_Delay(k, Volume));
+    //	return (Link[k].AdditionalCost + Link_Travel_Time(k, Volume));
+    return (Link_Travel_Time(k, Volume));
 }
 
 double LinkCost_Integral(int k, double* Volume)
 {
-    return (Link[k].AdditionalCost * Volume[k] + LinkDelay_Integral(k, Volume));
+    return (Link[k].AdditionalCost * Volume[k] + Link_Travel_Time_Integral(k, Volume));
 }
 
 double Link_GenCostDer(int k, double* Volume)
 {
-    return (Link_Delay_Der(k, Volume));
+    return (Link_Travel_Time_Der(k, Volume));
 }
 
 /* External functions */
@@ -1071,6 +1282,15 @@ void UpdateVolume(double* MainVolume, double* SDVolume, double Lambda)
     {
         MainVolume[k] += Lambda * SDVolume[k];
     }
+
+
+    for (int k = 1; k <= no_links; k++)
+    {
+        for (int m = 1; m <= no_modes; m++)
+        {
+            Link[k].mode_MainVolume[m] = (1- Lambda)* Link[k].mode_MainVolume[m]  + Lambda * Link[k].mode_SubVolume[m];
+        }
+    }
 }
 
 void UpdateLinkAdditionalCost(void)
@@ -1088,11 +1308,10 @@ double UpdateLinkCost(double* MainVolume)
 
     for (k = 1; k <= no_links; k++)
     {
-        Link[k].Delay = Link_Delay(k, MainVolume);
-        Link[k].Travel_time = Link_Delay(k, MainVolume);
+        Link[k].Travel_time = Link_Travel_Time(k, MainVolume);
 
         Link[k].GenCost = Link_GenCost(k, MainVolume);
-        system_wide_travel_time += (MainVolume[k] * Link[k].Delay);
+        system_wide_travel_time += (MainVolume[k] * Link[k].Travel_time);
     }
 
     return system_wide_travel_time;
@@ -1114,7 +1333,7 @@ void GetLinkTravelTimes(double* Volume, double* TravelTime)
 
     for (k = 1; k <= no_links; k++)
     {
-        TravelTime[k] = Link_Delay(k, Volume);
+        TravelTime[k] = Link_Travel_Time(k, Volume);
     }
 }
 
@@ -1173,6 +1392,10 @@ struct CLink {
     int free_speed;
 };
 
+
+
+
+
 void ReadLinks()
 {
     CDTACSVParser parser_link;
@@ -1197,6 +1420,9 @@ void ReadLinks()
             // Read link_id
             parser_link.GetValueByFieldName("from_node_id", Link[k].external_from_node_id);
             parser_link.GetValueByFieldName("to_node_id", Link[k].external_to_node_id);
+            parser_link.GetValueByFieldName("link_id", Link[k].link_id);
+
+            
 
             Link[k].internal_from_node_id = Link[k].external_from_node_id;
             Link[k].internal_to_node_id = Link[k].external_to_node_id;
@@ -1216,9 +1442,36 @@ void ReadLinks()
 
             parser_link.GetValueByFieldName("lanes", lanes);
             parser_link.GetValueByFieldName("capacity", capacity);
-            Link[k].Capacity = lanes * capacity;
+            Link[k].Link_Capacity = lanes * capacity;
 
             parser_link.GetValueByFieldName("free_speed", free_speed);
+            parser_link.GetValueByFieldName("allowed_use", Link[k].allowed_uses);
+
+            for (int m = 1; m <= no_modes; m++)
+            {
+                Link[k].mode_allowed_use[m] = 1;
+                Link[k].mode_MainVolume[m] = 0;
+                Link[k].mode_SubVolume[m] = 0;
+
+            }
+
+            if (Link[k].allowed_uses.size() > 0 && Link[k].allowed_uses != "all")
+            {
+                for (int m =1; m<= no_modes; m++)
+                {
+                    if (Link[k].allowed_uses.find(g_mode_type_vector[m].mode_type) != std::string::npos)  // otherwise, only an agent type is listed in this "allowed_uses", then this agent type is allowed to travel on this link
+                    {
+                        Link[k].mode_allowed_use[m] = 1;  // found 
+                    }
+                    else
+                    {
+                        Link[k].mode_allowed_use[m] = 0; 
+                    }
+                }
+
+
+            }
+
 
             // Read internal_from_node_id
 
@@ -1228,11 +1481,14 @@ void ReadLinks()
 
             Link[k].FreeTravelTime = Link[k].Distance / free_speed * 60.0;
 
-            parser_link.GetValueByFieldName("VDF_alpha", Link[k].B);
-            parser_link.GetValueByFieldName("VDF_beta", Link[k].Power);
+            parser_link.GetValueByFieldName("VDF_alpha", Link[k].VDF_Alpha);
+            parser_link.GetValueByFieldName("VDF_beta", Link[k].VDF_Beta);
+            parser_link.GetValueByFieldName("VDF_plf", Link[k].VDF_plf);
+
+
 
             if (capacity > 0)
-                Link[k].BoverC = Link[k].B / pow(capacity, Link[k].Power);
+                Link[k].BoverC = Link[k].VDF_Alpha / pow(capacity* lanes, Link[k].VDF_Beta);
             else
                 Link[k].BoverC = 0;
 
@@ -1243,9 +1499,9 @@ void ReadLinks()
     }
 
     // int count, k, internal_from_node_id, internal_to_node_id, Type;
-    // double Capacity, Distance, FreeTravelTime, B, Power, Speed, Toll;
+    // double Capacity, Distance, FreeTravelTime, B, VDF_Beta, Speed, Toll;
     // const char* LinkArgumentDescription[10] = {
-    // "internal_from_node_id","head","capacity","length", 	"free flow travel time","power","speed
+    // "internal_from_node_id","head","capacity","length", 	"free flow travel time","VDF_Beta","speed
     //limit","toll","link type","semicolomn - for end of link" };
     ///* Descriptions of the various link record arguments, used for error messages. */
 
@@ -1260,7 +1516,7 @@ void ReadLinks()
     //{ // Loop until break
     //	count = fscanf_s(LinksFile2, "%d %d %lf %lf %lf %lf %lf %lf %lf %d %1[;]",
     //		&internal_from_node_id, &internal_to_node_id, &Capacity, &Distance, &FreeTravelTime,
-    //		&B, &Power, &Speed, &Toll, &Type, Semicolon, sizeof(Semicolon));
+    //		&B, &VDF_Beta, &Speed, &Toll, &Type, Semicolon, sizeof(Semicolon));
     //	if (count == -1)
     //	{
     //		// If we read to the end of the file, break out of the loop.
@@ -1274,14 +1530,14 @@ void ReadLinks()
     //		}
     //	}
 
-    //	//if (Power < 0)
+    //	//if (VDF_Beta < 0)
     //	//{
-    //	//std::cout <<	("Link file '%s', link %d power %lf < 0 is decreasing cost",
-    //	//		LinksFileName, k, Link[k].Power);
+    //	//std::cout <<	("Link file '%s', link %d VDF_Beta %lf < 0 is decreasing cost",
+    //	//		LinksFileName, k, Link[k].VDF_Beta);
     //	//}
 
     //	if (Capacity > 0)
-    //		Link[k].BoverC = B / pow(Capacity, Power);
+    //		Link[k].BoverC = B / pow(Capacity, VDF_Beta);
     //	else {
     //		Link[k].BoverC = 0;
     //		//InputWarning("link file '%s', link %d from %d to %d has %lf capacity \n",
@@ -1365,7 +1621,7 @@ void FindLinksTo(void)
     for (k = 1; k <= no_links; k++)
         ListAdd(k, &(LinksTo[Link[k].internal_to_node_id]));
 }
-void InitLinks(void)
+void InitLinks()
 {
     char LinksFileName[100] = "link.csv";
     char* InterFlowFileName;
@@ -1395,7 +1651,7 @@ void CloseLinks(void)
 
 #define MAX_NO_BISECTITERATION 1000 /* Avoids inifinite loops in the second part */
 
-static int MinLineSearchIterations = 1;
+static int MinLineSearchIterations = 5;
 static int ActualIterations = 0;
 static double LastLambda = 1.0;
 
@@ -1437,8 +1693,6 @@ double LinksSDLineSearch(double* MainVolume, double* SDVolume)
     for (n = 1; n <= MinLineSearchIterations; n++)
     {
         grad = OF_LinksDirectionalDerivative(MainVolume, SDVolume, lambda);
-        StatusMessage("Line search step", "%lf", lambda);
-        StatusMessage("Line search grad", "%lf", grad);
 
         if (grad <= 0.0)
             lambdaleft = lambda;
@@ -1450,8 +1704,7 @@ double LinksSDLineSearch(double* MainVolume, double* SDVolume)
     for (; ((lambdaleft == 0) && (n <= MAX_NO_BISECTITERATION)); n++)
     {
         grad = OF_LinksDirectionalDerivative(MainVolume, SDVolume, lambda);
-        StatusMessage("Line search step", "%lf", lambda);
-        StatusMessage("Line search grad", "%lf", grad);
+
 
         if (grad <= 0.0)
             lambdaleft = lambda;
@@ -1799,18 +2052,22 @@ void StatusMessage(const char* group, const char* format, ...)
     double new_time;
 }
 
-void Read_ODtable(double** ODtable, int no_zones)
+void Read_ODtable(double*** ODtable, int no_zones)
 {
     char ch, Coloumn[2], Semicoloumn[2]; /* Reserve room for the '\0' in the fscanf_s. */
     int Orig, Dest, NewOrig, NewDest;
     double Value;
 
+
+    for(int m = 1; m <= no_modes; m++)
+    { 
     FILE* file;
-    fopen_s(&file, "demand.csv", "r");
+    fopen_s(&file, g_mode_type_vector[m].demand_file.c_str(), "r");
+    printf("read demand file %s\n", g_mode_type_vector[m].demand_file.c_str());
 
     if (file == NULL)
     {
-        printf("Failed to open file\n");
+        printf("Failed to open demand file %s\n", g_mode_type_vector[m].demand_file.c_str());
         return;
     }
 
@@ -1837,48 +2094,53 @@ void Read_ODtable(double** ODtable, int no_zones)
             {
                 printf("o_zone_id: %d, d_zone_id: %d, volume: %.2lf\n", o_zone_id, d_zone_id,
                     volume);
-                line_count++;
+
             }
-            ODtable[o_zone_id][d_zone_id] = volume;
+            ODtable[m][o_zone_id][d_zone_id] = volume;
             total_volume += volume;
+            line_count++;
         }
         else
         {
-            printf("Error reading line\n");
+            printf("Error reading line %d\n", line_count);
             break;
         }
     }
 
-    printf("total_volume = %f\n", total_volume);
+    printf(" mode type = %s, total_volume = %f\n", g_mode_type_vector[m].mode_type.c_str(), total_volume);
 
     fclose(file);
+
+    }
 }
 
-double Sum_ODtable(double** ODtable, int no_zones)
+double Sum_ODtable(double*** ODtable, int no_zones)
 {
     int Orig, Dest;
     double sum = 0.0;
 
+    for (int m = 1; m <= no_modes; m++)
     for (Orig = 1; Orig <= no_zones; Orig++)
         for (Dest = 1; Dest <= no_zones; Dest++)
-            sum += ODtable[Orig][Dest];
+             sum += ODtable[m][Orig][Dest];
+
     return (sum);
 }
 
-double** Read_ODflow(double* TotalODflow, int* no_zones)
+void Read_ODflow(double* TotalODflow, int* no_modes, int* no_zones)
 {
     FILE* ODflowFile;
     double RealTotal, InputTotal;
 
-    ODflow = (double**)Alloc_2D(*no_zones, *no_zones, sizeof(double));
-    RouteCost = (double**)Alloc_2D(*no_zones, *no_zones, sizeof(double));
-    Read_ODtable(ODflow, *no_zones);
+    MDODflow = (double***)Alloc_3D(*no_modes,*no_zones, *no_zones, sizeof(double));
+    MDRouteCost = (double***)Alloc_3D(*no_modes, *no_zones, *no_zones, sizeof(double));
 
-    RealTotal = (double)Sum_ODtable(ODflow, *no_zones);
+    Read_ODtable(MDODflow, *no_zones);
+
+    RealTotal = (double)Sum_ODtable(MDODflow, *no_zones);
 
     *TotalODflow = (double)RealTotal;
 
-    return (ODflow);
 }
 
 void ExitMessage(const char* format, ...)
