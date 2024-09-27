@@ -534,7 +534,8 @@ FILE* link_performance_file;
 #define BIGM 9999999      /* Represents an invalid value. */
 #define WAS_IN_QUEUE -7 /* Shows that the node was in the queue before. (7 is for luck.) */
 
-double Link_QueueVDF(int k, double Volume, double& P, double& vt2, double& Q_mu, double& Severe_Congestion_P, double model_speed[300]);
+double Link_QueueVDF(int k, double Volume, double& P, double& t0, double& t2, double& t3, double& vt2, double& Q_mu, double& Q_gamma, double & congestion_ref_speed, 
+    double& avg_queue_speed, double& avg_QVDF_period_speed, double& Severe_Congestion_P, double model_speed[300]);
 
 int Minpath(int mode, int Orig, int* PredLink, double* CostTo)
 {
@@ -949,12 +950,12 @@ int main(int argc, char** argv)
 
     fprintf(link_performance_file,
         "iteration_no,link_id,internal_from_node_id,internal_to_node_id,volume,ref_volume,"
-        "capacity,voc,fftt,travel_time,VDF_alpha,VDF_beta,VDF_plf,speed,VMT,VHT,PMT,PHT,geometry,");
+        "capacity,doc,fftt,travel_time,VDF_alpha,VDF_beta,VDF_plf,speed,VMT,VHT,PMT,PHT,geometry,");
 
     for (int m = 1; m <= no_modes; m++)
         fprintf(link_performance_file, "mod_vol_%s,", g_mode_type_vector[m].mode_type.c_str());
 
-    fprintf(link_performance_file, "P, vt2, mu, Severe_Congestion_P,");
+    fprintf(link_performance_file, "P,t0,t2,t3,vt2,mu,Q_gamma,free_speed,cutoff_speed,congestion_ref_speed,avg_queue_speed,avg_QVDF_period_speed,Severe_Congestion_P,");
 
     for (int t = demand_period_starting_hours * 60; t < demand_period_ending_hours * 60; t += 5)
     {
@@ -1077,10 +1078,18 @@ int main(int argc, char** argv)
         double mu = Link[k].Lane_Capacity;
         double Severe_Congestion_P;
         double model_speed[300];
+        double t0 = 0;
+        double t2 = 0;
+        double t3 = 0;
+        double Q_gamma = 0;
+        double congestion_ref_speed = 0; 
+        double avg_queue_speed = 0;
+        double avg_QVDF_period_speed = 0;
 
-        Link_QueueVDF(k, MainVolume[k], P, vt2, mu, Severe_Congestion_P, model_speed);
+        Link_QueueVDF(k, MainVolume[k], P,t0,t2,t3, vt2, mu, Q_gamma, congestion_ref_speed, avg_queue_speed, avg_QVDF_period_speed, Severe_Congestion_P, model_speed);
 
-        fprintf(link_performance_file, "%f,%f,%f,%f,", P, vt2, mu, Severe_Congestion_P);
+        fprintf(link_performance_file, "%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,", P, t0, t2, t3, vt2, mu, Q_gamma, Link[k].free_speed, Link[k].Cutoff_Speed,
+            congestion_ref_speed, avg_queue_speed, avg_QVDF_period_speed, Severe_Congestion_P);
         for (int t = demand_period_starting_hours * 60; t < demand_period_ending_hours * 60; t += 5)
         {
             int t_interval = t / 5;
@@ -1260,7 +1269,8 @@ double Link_Travel_Time(int k, double* Volume)
 }
 
 
-double Link_QueueVDF(int k, double Volume, double &P, double& vt2, double& Q_mu, double& Severe_Congestion_P, double model_speed[300])
+double Link_QueueVDF(int k, double Volume, double &P, double &t0, double &t2, double &t3, double& vt2, double& Q_mu, double &Q_gamma, double& congestion_ref_speed,
+    double& avg_queue_speed, double &avg_QVDF_period_speed, double& Severe_Congestion_P, double model_speed[300])
 {
 
     double IncomingDemand = Volume / fmax(0.001, demand_period_ending_hours - demand_period_starting_hours) / Link[k].VDF_plf;
@@ -1269,45 +1279,42 @@ double Link_QueueVDF(int k, double Volume, double &P, double& vt2, double& Q_mu,
     double Travel_time =
         Link[k].FreeTravelTime * (1.0 + Link[k].VDF_Alpha * (pow(DOC, Link[k].VDF_Beta)));
 
+    congestion_ref_speed = Link[k].Cutoff_Speed;
+    if (DOC < 1)
+        congestion_ref_speed = (1 - DOC) * Link[k].free_speed + DOC * Link[k].Cutoff_Speed;
+
+
     //step 3.2 calculate speed from VDF based on D/C ratio
-    double avg_queue_speed = Link[k].Cutoff_Speed / (1.0 + Link[k].VDF_Alpha * pow(DOC, Link[k].VDF_Beta));
-
-   /* double dc_transition_ratio = 1.0;*/
-    //// will revisit again
-    //if (DOC < dc_transition_ratio)  // free flow regime
-    //{
-
-    //    double vf_alpha = (1.0 + alpha) * vf / max(0.0001, v_VDF_congestion_cutoff) - 1.0;
-    //    // fixed to pass through vcutoff point vf/ (1+vf_alpha) = vc / (1+ VDF_alpha) ->
-    //    // 1+vf_alpha = vf/vc *(1+VDF_alpha)
-    //    // vf_qlpha =  vf/vc *(1+VDF_alpha) - 1
-    //    // revised BPR DC
-    //    double vf_beta = beta; // to be calibrated
-    //    double vf_avg_speed = vf / (1.0 + vf_alpha * pow(DOC, vf_beta));
-    //    avg_queue_speed = vf_avg_speed; // rewrite with vf based speed
-    //    Q_n_current_value = beta;
-    //    RTT = link_length_in_1km / max(0.01, vf);  // in hour
-    //}
+    avg_queue_speed = congestion_ref_speed / (1.0 + Link[k].VDF_Alpha * pow(DOC, Link[k].VDF_Beta));
+ 
 
     P = Link[k].Q_cd * pow(DOC, Link[k].Q_n);  // applifed for both uncongested and congested conditions
+
+    double H = demand_period_ending_hours - demand_period_starting_hours;
+  
+    if (P > H)
+        avg_QVDF_period_speed = avg_queue_speed;
+    else
+        avg_QVDF_period_speed = P / H * avg_queue_speed + (1.0 - P / H) * (congestion_ref_speed + Link[k].free_speed) / 2.0;
+
 
     double base = Link[k].Q_cp * pow(P, Link[k].Q_s) + 1.0;
     vt2 = Link[k].Cutoff_Speed / fmax(0.001, base);
 
-    double t2 = (demand_period_starting_hours + demand_period_starting_hours) / 2.0; 
-    double t0 = t2 - 0.5 * P;
-    double t3 = t2 + 0.5 * P;
+    t2 = (demand_period_starting_hours + demand_period_ending_hours) / 2.0; 
+    t0 = t2 - 0.5 * P;
+    t3 = t2 + 0.5 * P;
 
     double lane_based_D = IncomingDemand / fmax(0.01, Link[k].lanes);
     Q_mu = std::min(Link[k].Lane_Capacity, lane_based_D / std::max(0.01, P));
 
     //use  as the lower speed compared to 8/15 values for the congested states
-    double RTT = Link[k].length / fmax(0.01, Link[k].Cutoff_Speed) * 60.0;
+    double RTT = Link[k].length / fmax(0.01, congestion_ref_speed);
     double wt2 = Link[k].length / vt2 - RTT; // in hour
 
 
     //step 5 compute gamma parameter is controlled by the maximum queue
-    double Q_gamma = wt2 * 64 * Q_mu / pow(P, 4);  // because q_tw = w*mu =1/4 * gamma (P/2)^4, => 1/vt2 * mu = 1/4 * gamma  * (P/2)^4
+    Q_gamma = wt2 * 64 * Q_mu / pow(P, 4);  // because q_tw = w*mu =1/4 * gamma (P/2)^4, => 1/vt2 * mu = 1/4 * gamma  * (P/2)^4
 
 
     double td_w = 0;
@@ -1335,13 +1342,13 @@ double Link_QueueVDF(int k, double Volume, double &P, double& vt2, double& Q_mu,
         {
             td_queue = 0;
             double factor = (t - demand_period_starting_hours) / fmax(0.001, t0 - demand_period_starting_hours);
-            td_speed = (1 - factor) * Link[k].free_speed + factor * fmax(Link[k].Cutoff_Speed, avg_queue_speed);
+            td_speed = (1 - factor) * Link[k].free_speed + factor * fmax(congestion_ref_speed, avg_queue_speed);
         }
         else  // t> t3
         {
             td_queue = 0;
             double factor = (t - t3) / fmax(0.001, demand_period_ending_hours - t3);
-            td_speed = (1 - factor) * fmax(Link[k].Cutoff_Speed, avg_queue_speed) + (factor)*Link[k].free_speed;
+            td_speed = (1 - factor) * fmax(congestion_ref_speed, avg_queue_speed) + (factor)*Link[k].free_speed;
         }
 
         // dtalog.output() << "td_queue t" << t << " =  " << td_queue << ", speed =" << td_speed << '\n';
