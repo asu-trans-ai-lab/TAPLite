@@ -534,7 +534,7 @@ FILE* link_performance_file;
 #define BIGM 9999999      /* Represents an invalid value. */
 #define WAS_IN_QUEUE -7 /* Shows that the node was in the queue before. (7 is for luck.) */
 
-double Link_QueueVDF(int k, double Volume, double& P, double& t0, double& t2, double& t3, double& vt2, double& Q_mu, double& Q_gamma, double & congestion_ref_speed, 
+double Link_QueueVDF(int k, double Volume, double& IncomingDemand, double &DOC, double& P, double& t0, double& t2, double& t3, double& vt2, double& Q_mu, double& Q_gamma, double & congestion_ref_speed,
     double& avg_queue_speed, double& avg_QVDF_period_speed, double& Severe_Congestion_P, double model_speed[300]);
 
 int Minpath(int mode, int Orig, int* PredLink, double* CostTo)
@@ -723,7 +723,7 @@ void Assign(int Assignment_iteration_no, double*** ODflow, int*** MinPathPredLin
             if (Dest == Orig)
                 continue;
 
-            RouteFlow = MDODflow[m][Orig][Dest];
+            RouteFlow = ODflow[m][Orig][Dest];  //test
             if (RouteFlow == 0)
                 continue;
 
@@ -950,7 +950,7 @@ int main(int argc, char** argv)
 
     fprintf(link_performance_file,
         "iteration_no,link_id,internal_from_node_id,internal_to_node_id,volume,ref_volume,"
-        "capacity,doc,fftt,travel_time,VDF_alpha,VDF_beta,VDF_plf,speed,VMT,VHT,PMT,PHT,geometry,");
+        "capacity,D,doc,fftt,travel_time,VDF_alpha,VDF_beta,VDF_plf,speed,VMT,VHT,PMT,PHT,geometry,");
 
     for (int m = 1; m <= no_modes; m++)
         fprintf(link_performance_file, "mod_vol_%s,", g_mode_type_vector[m].mode_type.c_str());
@@ -1028,7 +1028,7 @@ int main(int argc, char** argv)
 
         //for (int k = 1; k <= no_links; k++)
         //{
-        //    fprintf(logfile, "%d,%d,%d,%d,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf\n",
+        //    fprintf(logfile, "%d,%d,%d,%d,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf\n",
         //        iteration_no, k, Link[k].external_from_node_id, Link[k].external_to_node_id,
         //        MainVolume[k], Link[k].Ref_volume, Link[k].Capacity,
         //        MainVolume[k] / fmax(0.01, Link[k].Capacity), Link[k].FreeTravelTime,
@@ -1040,7 +1040,7 @@ int main(int argc, char** argv)
 
     //for (int k = 1; k <= no_links; k++)
     //{
-    //    fprintf(logfile, "%d,%d,%d,%d,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf\n", iteration_no, k,
+    //    fprintf(logfile, "%d,%d,%d,%d,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf\n", iteration_no, k,
     //        Link[k].external_from_node_id, Link[k].external_to_node_id, MainVolume[k],
     //        Link[k].Capacity, MainVolume[k] / fmax(0.01, Link[k].Capacity),
     //        Link[k].FreeTravelTime, Link[k].Travel_time,
@@ -1049,11 +1049,7 @@ int main(int argc, char** argv)
 
     for (int k = 1; k <= no_links; k++)
     {
-        fprintf(link_performance_file, "%d,%d,%d,%d,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf,%.2lf,",
-            iteration_no, Link[k].link_id, Link[k].external_from_node_id, Link[k].external_to_node_id,
-            MainVolume[k], Link[k].Ref_volume, Link[k].Link_Capacity, MainVolume[k] / fmax(0.01, Link[k].Link_Capacity), Link[k].FreeTravelTime,
-            Link[k].Travel_time, Link[k].VDF_Alpha, Link[k].VDF_Beta, Link[k].VDF_plf, Link[k].length/fmax(Link[k].Travel_time/60.0, 0.001), Link[k].Travel_time - Link[k].FreeTravelTime);
-   
+      
         double VMT, VHT, PMT, PHT;
         VMT = 0; VHT = 0;  PMT = 0; PHT = 0;
         for (int m = 1; m <= no_modes; m++)
@@ -1064,13 +1060,6 @@ int main(int argc, char** argv)
             PHT += Link[k].mode_MainVolume[m] * g_mode_type_vector[m].occ * Link[k].Travel_time / 60.0;
 
         }
-        fprintf(link_performance_file, "%2lf,%2lf,%2lf,%2lf,", VMT, VHT, PMT, PHT);
-
-        fprintf(link_performance_file, "\"%s\",",
-            Link[k].geometry.c_str());
-
-        for (int m = 1; m <= no_modes; m++)
-            fprintf(link_performance_file, "%2lf,",Link[k].mode_MainVolume[m]);
 
 
         double P = 0;
@@ -1085,8 +1074,22 @@ int main(int argc, char** argv)
         double congestion_ref_speed = 0; 
         double avg_queue_speed = 0;
         double avg_QVDF_period_speed = 0;
+        double IncomingDemand = 0; 
+        double DOC = 0;
+        Link_QueueVDF(k, MainVolume[k], IncomingDemand, DOC, P,t0,t2,t3, vt2, mu, Q_gamma, congestion_ref_speed, avg_queue_speed, avg_QVDF_period_speed, Severe_Congestion_P, model_speed);
 
-        Link_QueueVDF(k, MainVolume[k], P,t0,t2,t3, vt2, mu, Q_gamma, congestion_ref_speed, avg_queue_speed, avg_QVDF_period_speed, Severe_Congestion_P, model_speed);
+        fprintf(link_performance_file, "%d,%d,%d,%d,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,",
+            iteration_no, Link[k].link_id, Link[k].external_from_node_id, Link[k].external_to_node_id,
+            MainVolume[k], Link[k].Ref_volume, Link[k].Link_Capacity, IncomingDemand, DOC, Link[k].FreeTravelTime,
+            Link[k].Travel_time, Link[k].VDF_Alpha, Link[k].VDF_Beta, Link[k].VDF_plf, Link[k].length / fmax(Link[k].Travel_time / 60.0, 0.001), Link[k].Travel_time - Link[k].FreeTravelTime);
+
+        fprintf(link_performance_file, "%2lf,%2lf,%2lf,%2lf,", VMT, VHT, PMT, PHT);
+
+        fprintf(link_performance_file, "\"%s\",",
+            Link[k].geometry.c_str());
+
+        for (int m = 1; m <= no_modes; m++)
+            fprintf(link_performance_file, "%2lf,", Link[k].mode_MainVolume[m]);
 
         fprintf(link_performance_file, "%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,", P, t0, t2, t3, vt2, mu, Q_gamma, Link[k].free_speed, Link[k].Cutoff_Speed,
             congestion_ref_speed, avg_queue_speed, avg_QVDF_period_speed, Severe_Congestion_P);
@@ -1261,7 +1264,7 @@ void Free_3D(void*** Array, int dim1, int dim2, int dim3)
 
 double Link_Travel_Time(int k, double* Volume)
 {
-    double IncomingDemand = Volume[k]/fmax(0.001, demand_period_ending_hours - demand_period_starting_hours)/ Link[k].VDF_plf;
+    double IncomingDemand = Volume[k]/fmax(0.01, Link[k].lanes) /fmax(0.001, demand_period_ending_hours - demand_period_starting_hours)/ Link[k].VDF_plf;
 
     Link[k].Travel_time =
         Link[k].FreeTravelTime * (1.0 + Link[k].VDF_Alpha * (pow(IncomingDemand / fmax(0.1,Link[k].Link_Capacity), Link[k].VDF_Beta)));
@@ -1269,12 +1272,12 @@ double Link_Travel_Time(int k, double* Volume)
 }
 
 
-double Link_QueueVDF(int k, double Volume, double &P, double &t0, double &t2, double &t3, double& vt2, double& Q_mu, double &Q_gamma, double& congestion_ref_speed,
+double Link_QueueVDF(int k, double Volume, double &IncomingDemand, double &DOC, double &P, double &t0, double &t2, double &t3, double& vt2, double& Q_mu, double &Q_gamma, double& congestion_ref_speed,
     double& avg_queue_speed, double &avg_QVDF_period_speed, double& Severe_Congestion_P, double model_speed[300])
 {
 
-    double IncomingDemand = Volume / fmax(0.001, demand_period_ending_hours - demand_period_starting_hours) / Link[k].VDF_plf;
-    double DOC = IncomingDemand / fmax(0.1, Link[k].Link_Capacity);
+    IncomingDemand = Volume / fmax(0.01, Link[k].lanes)/fmax(0.001, demand_period_ending_hours - demand_period_starting_hours) / Link[k].VDF_plf;
+    DOC = IncomingDemand / fmax(0.1, Link[k].Lane_Capacity);
 
     double Travel_time =
         Link[k].FreeTravelTime * (1.0 + Link[k].VDF_Alpha * (pow(DOC, Link[k].VDF_Beta)));
@@ -1305,8 +1308,7 @@ double Link_QueueVDF(int k, double Volume, double &P, double &t0, double &t2, do
     t0 = t2 - 0.5 * P;
     t3 = t2 + 0.5 * P;
 
-    double lane_based_D = IncomingDemand / fmax(0.01, Link[k].lanes);
-    Q_mu = std::min(Link[k].Lane_Capacity, lane_based_D / std::max(0.01, P));
+    Q_mu = std::min(Link[k].Lane_Capacity, IncomingDemand / std::max(0.01, P));
 
     //use  as the lower speed compared to 8/15 values for the congested states
     double RTT = Link[k].length / fmax(0.01, congestion_ref_speed);
@@ -1673,7 +1675,7 @@ void ReadLinks()
             parser_link.GetValueByFieldName("VDF_s", Link[k].Q_s);
    
             Link[k].free_speed = free_speed;
-            Link[k].Cutoff_Speed = free_speed * 0.642857143;  // use 0.642857143 as default ratio, when free_speed = 70 mph, Cutoff_Speed = 45 mph
+            Link[k].Cutoff_Speed = free_speed * 0.75;  // use 0.75 as default ratio, when free_speed = 70 mph, Cutoff_Speed = 52.8 mph in I-10 data set
             parser_link.GetValueByFieldName("geometry", Link[k].geometry, false);
             k++;
         }
@@ -2275,7 +2277,7 @@ void Read_ODtable(double*** ODtable, int no_zones)
         {
             if (line_count <= 3)
             {
-                printf("o_zone_id: %d, d_zone_id: %d, volume: %.2lf\n", o_zone_id, d_zone_id,
+                printf("o_zone_id: %d, d_zone_id: %d, volume: %.4lf\n", o_zone_id, d_zone_id,
                     volume);
 
             }
