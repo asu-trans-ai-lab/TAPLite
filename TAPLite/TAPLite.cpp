@@ -67,7 +67,12 @@ struct link_record {
     double mode_Toll[MAX_MODE_TYPES];
     double mode_AdditionalCost[MAX_MODE_TYPES];
 
-    double Travel_time;
+    double Travel_time;  // final travel time used in assignment 
+    double BPR_TT;  // BPR_based travel time  for the entire assignment period  
+    double QVDF_TT;  // QVDF_based travel time for the entire assignment period  
+
+
+
     double GenCost;
     double GenCostDer;
     double Ref_volume;
@@ -83,6 +88,9 @@ struct link_record {
         Q_cp = 0.28125 /*0.15*15/8*/; 
         Q_s = 4; 
     
+        Travel_time = 0; 
+        BPR_TT = 0;
+        QVDF_TT = 0; 
     }
 };
 
@@ -950,7 +958,7 @@ int main(int argc, char** argv)
 
     fprintf(link_performance_file,
         "iteration_no,link_id,internal_from_node_id,internal_to_node_id,volume,ref_volume,"
-        "capacity,D,doc,fftt,travel_time,VDF_alpha,VDF_beta,VDF_plf,speed,VMT,VHT,PMT,PHT,geometry,");
+        "capacity,D,doc,fftt,travel_time,VDF_alpha,VDF_beta,VDF_plf,speed,VMT,VHT,PMT,PHT,VHT_QVDF,PHT_QVDF,geometry,");
 
     for (int m = 1; m <= no_modes; m++)
         fprintf(link_performance_file, "mod_vol_%s,", g_mode_type_vector[m].mode_type.c_str());
@@ -1050,16 +1058,7 @@ int main(int argc, char** argv)
     for (int k = 1; k <= no_links; k++)
     {
       
-        double VMT, VHT, PMT, PHT;
-        VMT = 0; VHT = 0;  PMT = 0; PHT = 0;
-        for (int m = 1; m <= no_modes; m++)
-        {
-            VMT += MainVolume[k] * Link[k].length;
-            VHT += MainVolume[k] * Link[k].Travel_time / 60.0;
-            PMT += Link[k].mode_MainVolume[m]*g_mode_type_vector[m].occ * Link[k].length;
-            PHT += Link[k].mode_MainVolume[m] * g_mode_type_vector[m].occ * Link[k].Travel_time / 60.0;
-
-        }
+ 
 
 
         double P = 0;
@@ -1078,12 +1077,29 @@ int main(int argc, char** argv)
         double DOC = 0;
         Link_QueueVDF(k, MainVolume[k], IncomingDemand, DOC, P,t0,t2,t3, vt2, mu, Q_gamma, congestion_ref_speed, avg_queue_speed, avg_QVDF_period_speed, Severe_Congestion_P, model_speed);
 
+
+        double VMT, VHT, PMT, PHT, VHT_QVDF, PHT_QVDF;
+        VMT = 0; VHT = 0;  PMT = 0; PHT = 0; VHT_QVDF = 0; PHT_QVDF = 0;
+        for (int m = 1; m <= no_modes; m++)
+        {
+            VMT += MainVolume[k] * Link[k].length;
+            VHT += MainVolume[k] * Link[k].Travel_time / 60.0;
+
+            PMT += Link[k].mode_MainVolume[m] * g_mode_type_vector[m].occ * Link[k].length;
+            PHT += Link[k].mode_MainVolume[m] * g_mode_type_vector[m].occ * Link[k].Travel_time / 60.0;
+
+            VHT_QVDF += MainVolume[k] * Link[k].QVDF_TT / 60.0;
+            PHT_QVDF += Link[k].mode_MainVolume[m] * g_mode_type_vector[m].occ * Link[k].QVDF_TT / 60.0;
+
+
+        }
+
         fprintf(link_performance_file, "%d,%d,%d,%d,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,",
             iteration_no, Link[k].link_id, Link[k].external_from_node_id, Link[k].external_to_node_id,
             MainVolume[k], Link[k].Ref_volume, Link[k].Link_Capacity, IncomingDemand, DOC, Link[k].FreeTravelTime,
             Link[k].Travel_time, Link[k].VDF_Alpha, Link[k].VDF_Beta, Link[k].VDF_plf, Link[k].length / fmax(Link[k].Travel_time / 60.0, 0.001), Link[k].Travel_time - Link[k].FreeTravelTime);
 
-        fprintf(link_performance_file, "%2lf,%2lf,%2lf,%2lf,", VMT, VHT, PMT, PHT);
+        fprintf(link_performance_file, "%2lf,%2lf,%2lf,%2lf,%2lf,%2lf,", VMT, VHT, PMT, PHT, VHT_QVDF, PHT_QVDF);
 
         fprintf(link_performance_file, "\"%s\",",
             Link[k].geometry.c_str());
@@ -1268,6 +1284,9 @@ double Link_Travel_Time(int k, double* Volume)
 
     Link[k].Travel_time =
         Link[k].FreeTravelTime * (1.0 + Link[k].VDF_Alpha * (pow(IncomingDemand / fmax(0.1,Link[k].Link_Capacity), Link[k].VDF_Beta)));
+
+    Link[k].BPR_TT = Link[k].Travel_time;
+
     return (Link[k].Travel_time);
 }
 
@@ -1299,6 +1318,13 @@ double Link_QueueVDF(int k, double Volume, double &IncomingDemand, double &DOC, 
         avg_QVDF_period_speed = avg_queue_speed;
     else
         avg_QVDF_period_speed = P / H * avg_queue_speed + (1.0 - P / H) * (congestion_ref_speed + Link[k].free_speed) / 2.0;
+    
+
+     Link[k].QVDF_TT = Link[k].length / fmax(0.1, avg_QVDF_period_speed) * 60.0;
+
+   
+
+
 
 
     double base = Link[k].Q_cp * pow(P, Link[k].Q_s) + 1.0;
