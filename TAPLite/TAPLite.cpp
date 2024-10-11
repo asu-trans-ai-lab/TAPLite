@@ -76,6 +76,8 @@ struct link_record {
     double GenCost;
     double GenCostDer;
     double Ref_volume;
+    double Base_volume;
+
     std::string geometry; 
     link_record()
     {
@@ -91,6 +93,8 @@ struct link_record {
         Travel_time = 0; 
         BPR_TT = 0;
         QVDF_TT = 0; 
+        Ref_volume = 0; 
+        Base_volume = 0;
     }
 };
 
@@ -715,7 +719,7 @@ void Assign(int Assignment_iteration_no, double*** ODflow, int*** MinPathPredLin
 
     for (k = 1; k <= no_links; k++)
     {
-        Volume[k] = 0.0;
+        Volume[k] = Link[k].Base_volume;  // use the base as the intial volume before OD, route flow assignment 
 
         for (int m = 1; m <= no_modes; m++)
             Link[k].mode_SubVolume[m] = 0.0;
@@ -951,19 +955,25 @@ int main(int argc, char** argv)
     MainVolume = (double*)Alloc_1D(no_links, sizeof(double));
     SDVolume = SubVolume = (double*)Alloc_1D(
         no_links, sizeof(double)); /* Compute search direction and sub-volume in the same place. */
-    MDMinPathPredLink = (int***)Alloc_3D(no_modes,no_zones, no_nodes, sizeof(int));
+    MDMinPathPredLink = (int***)Alloc_3D(no_modes, no_zones, no_nodes, sizeof(int));
 
     // InitFWstatus(&fw_status);
+
+    for (int k = 1; k <= no_links; k++)
+    {
+        MainVolume[k] = Link[k].Base_volume;  // assign the base volume  to main volume 
+    }
+
     system_wide_travel_time = UpdateLinkCost(MainVolume);  // set up the cost first using FFTT
 
     fprintf(link_performance_file,
-        "iteration_no,link_id,internal_from_node_id,internal_to_node_id,volume,ref_volume,"
+        "iteration_no,link_id,internal_from_node_id,internal_to_node_id,volume,ref_volume,base_volume,"
         "capacity,D,doc,fftt,travel_time,VDF_alpha,VDF_beta,VDF_plf,speed,VMT,VHT,PMT,PHT,VHT_QVDF,PHT_QVDF,geometry,");
 
     for (int m = 1; m <= no_modes; m++)
         fprintf(link_performance_file, "mod_vol_%s,", g_mode_type_vector[m].mode_type.c_str());
 
-    fprintf(link_performance_file, "P,t0,t2,t3,vt2,mu,Q_gamma,free_speed,cutoff_speed,congestion_ref_speed,avg_queue_speed,avg_QVDF_period_speed,Severe_Congestion_P,");
+    fprintf(link_performance_file, "P,t0,t2,t3,vt2,mu,Q_gamma,free_speed,cutoff_speed,congestion_ref_speed,avg_queue_speed,avg_QVDF_period_speed,avg_QVDF_period_travel_time,Severe_Congestion_P,");
 
     for (int t = demand_period_starting_hours * 60; t < demand_period_ending_hours * 60; t += 5)
     {
@@ -1094,9 +1104,9 @@ int main(int argc, char** argv)
 
         }
 
-        fprintf(link_performance_file, "%d,%d,%d,%d,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,",
+        fprintf(link_performance_file, "%d,%d,%d,%d,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,",
             iteration_no, Link[k].link_id, Link[k].external_from_node_id, Link[k].external_to_node_id,
-            MainVolume[k], Link[k].Ref_volume, Link[k].Link_Capacity, IncomingDemand, DOC, Link[k].FreeTravelTime,
+            MainVolume[k], Link[k].Ref_volume, Link[k].Base_volume, Link[k].Link_Capacity, IncomingDemand, DOC, Link[k].FreeTravelTime,
             Link[k].Travel_time, Link[k].VDF_Alpha, Link[k].VDF_Beta, Link[k].VDF_plf, Link[k].length / fmax(Link[k].Travel_time / 60.0, 0.001), Link[k].Travel_time - Link[k].FreeTravelTime);
 
         fprintf(link_performance_file, "%2lf,%2lf,%2lf,%2lf,%2lf,%2lf,", VMT, VHT, PMT, PHT, VHT_QVDF, PHT_QVDF);
@@ -1107,8 +1117,8 @@ int main(int argc, char** argv)
         for (int m = 1; m <= no_modes; m++)
             fprintf(link_performance_file, "%2lf,", Link[k].mode_MainVolume[m]);
 
-        fprintf(link_performance_file, "%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,", P, t0, t2, t3, vt2, mu, Q_gamma, Link[k].free_speed, Link[k].Cutoff_Speed,
-            congestion_ref_speed, avg_queue_speed, avg_QVDF_period_speed, Severe_Congestion_P);
+        fprintf(link_performance_file, "%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,", P, t0, t2, t3, vt2, mu, Q_gamma, Link[k].free_speed, Link[k].Cutoff_Speed,
+            congestion_ref_speed, avg_queue_speed, avg_QVDF_period_speed, Link[k].QVDF_TT, Severe_Congestion_P);
         for (int t = demand_period_starting_hours * 60; t < demand_period_ending_hours * 60; t += 5)
         {
             int t_interval = t / 5;
@@ -1623,7 +1633,8 @@ void ReadLinks()
 
             parser_link.GetValueByFieldName("length", Link[k].length);
             parser_link.GetValueByFieldName("ref_volume", Link[k].Ref_volume);
-
+            parser_link.GetValueByFieldName("base_volume", Link[k].Base_volume);
+            
             parser_link.GetValueByFieldName("lanes", lanes);
             parser_link.GetValueByFieldName("capacity", capacity);
 
