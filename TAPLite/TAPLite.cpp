@@ -220,7 +220,7 @@ static void CloseODflow(void);
 /* End of local declarations. */
 
 FILE* logfile;
-int shortest_path_log_flag = 0;
+int shortest_path_log_flag = 1;
 int baseODDemand_loaded_flag = 0;
 int baselinkvolume_loaded_flag = 0;
 
@@ -394,6 +394,26 @@ double FindMinCostRoutes(int*** MinPathPredLink)
 
 /* Assign OD flows to links according to the routes in MinPathPredLink. */
 
+// Define a global 3D vector to store link indices for each OD pair
+
+// Global 5D vector for storing link sequences
+std::vector<std::vector<std::vector<std::vector<std::vector<int>>>>> linkIndices;
+
+void AddLinkSequence(int m, int Orig, int Dest, int route_id, const std::vector<int>& linkIDs)
+{
+    // Ensure we are within bounds before adding the link sequence
+    if (Orig > 0 && Orig < linkIndices[m].size() &&
+        Dest > 0 && Dest < linkIndices[m][Orig].size() &&
+        route_id > 0 && route_id < linkIndices[m][Orig][Dest].size())
+    {
+        linkIndices[m][Orig][Dest][route_id] = linkIDs;  // Add link sequence to the 5D vector
+    }
+    else
+    {
+        std::cerr << "Error: Invalid indices for adding link sequence." << std::endl;
+    }
+}
+
 void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int*** MinPathPredLink, double* Volume)
 {
     int Dest, Orig, k;
@@ -430,6 +450,7 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
             //double total_travel_time = 0;
             //double total_length = 0;
             //double total_FFTT = 0;
+            std::vector<int> currentLinkSequence; // Temporary vector to store link indices
 
             while (CurrentNode != Orig)
             {
@@ -444,7 +465,17 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
 
                 CurrentNode = Link[k].internal_from_node_id;
 
+                if (shortest_path_log_flag)
+                {
+                    currentLinkSequence.push_back(k); // Store the link index
+                }
+            }
 
+            if (shortest_path_log_flag)
+            {
+                AddLinkSequence(m, Orig, Dest, Assignment_iteration_no, currentLinkSequence);
+                // Store the link sequence for this OD pair
+         
             }
 
         }
@@ -517,6 +548,113 @@ void Assign_with_Baseline_Volume(int Assignment_iteration_no, double*** ODflow, 
     /*	fclose(logfile_od)*/;
     StatusMessage("Assign", "Finished assign.");
 }
+
+
+#include <fstream>  // for file output
+
+#include <unordered_map>  // For hash table (unordered_map)
+#include <fstream>        // For file output
+#include <string>
+#include <vector>
+#include <iostream>
+
+// Hash table to store unique (node sum, link sum) combinations
+
+
+void OutputRouteDetails(const std::string& filename)
+{
+    std::ofstream outputFile(filename);  // Open the file for writing
+
+    // Write the CSV header in lowercase
+    outputFile << "mode,route_id,origin,destination,unique_route_id,node_ids,link_ids,total_distance,total_free_flow_travel_time,total_travel_time\n";
+
+    for (int m = 1; m < linkIndices.size(); ++m)
+    {
+        for (int Orig = 1; Orig < linkIndices[m].size(); ++Orig)
+        {
+            for (int Dest = 1; Dest < linkIndices[m][Orig].size(); ++Dest)
+            {
+                std::unordered_map<std::string, bool> uniqueRoutes;
+                int unique_route_id = 1; 
+                for (int route_id = 1; route_id < linkIndices[m][Orig][Dest].size(); ++route_id)
+                {
+                    if (!linkIndices[m][Orig][Dest][route_id].empty())
+                    {
+                        double totalDistance = 0.0;
+                        double totalFreeFlowTravelTime = 0.0;
+                        double totalTravelTime = 0.0;
+                        std::string nodeIDsStr;
+                        std::string linkIDsStr;
+
+                        int nodeSum = 0;  // Sum of node IDs
+                        int linkSum = 0;  // Sum of link IDs
+
+                        // Collect node IDs, link indices, compute total distance, travel times, and calculate sums
+                        for (size_t i = 0; i < linkIndices[m][Orig][Dest][route_id].size(); ++i)
+                        {
+                            int k = linkIndices[m][Orig][Dest][route_id][i];
+
+                            // Append the from_node_id for each link and calculate the node sum
+                            int fromNodeID = Link[k].external_from_node_id;
+                            nodeIDsStr += std::to_string(fromNodeID) + ";";
+                            nodeSum += fromNodeID;
+
+                            // Append the link index (link ID) to the string and calculate the link sum
+                            linkIDsStr += std::to_string(k) + ";";
+                            linkSum += k;
+
+                            // Sum up the total distance and travel times
+                            totalDistance += Link[k].length;
+                            totalFreeFlowTravelTime += Link[k].FreeTravelTime;
+                            totalTravelTime += Link[k].Travel_time;
+
+                            // For the last link, also add the to_node_id
+                            if (i == linkIndices[m][Orig][Dest][route_id].size() - 1)
+                            {
+                                int toNodeID = Link[k].external_to_node_id;
+                                nodeIDsStr += std::to_string(toNodeID);
+                                nodeSum += toNodeID;
+                            }
+                        }
+
+                        // Create a unique key based on the node sum and link sum
+                        std::string routeKey = std::to_string(nodeSum) + "_" + std::to_string(linkSum);
+
+                        // Check if this route (based on node and link sums) is already output
+                        if (uniqueRoutes.find(routeKey) == uniqueRoutes.end())
+                        {
+                            // This is a unique route, store it in the hash table
+                            uniqueRoutes[routeKey] = true;
+
+                            // Remove trailing space from the link IDs string
+                            if (!linkIDsStr.empty())
+                                linkIDsStr.pop_back();
+
+                            // Write the data for this OD pair and route to the CSV file
+                            outputFile << g_mode_type_vector[m].mode_type.c_str() << "," << route_id << "," << Orig << "," << Dest << "," << unique_route_id << ","
+                                << nodeIDsStr << "," << linkIDsStr << ","
+                                << totalDistance << "," << totalFreeFlowTravelTime << ","
+                                << totalTravelTime << "\n";
+
+                            unique_route_id++;
+                        }
+                        else
+                        {
+                            // Duplicate path found, skipping output
+                            //std::cout << "Duplicate route skipped for Origin: " << Orig << ", Destination: " << Dest << "\n";
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Close the file after writing
+    outputFile.close();
+    std::cout << "Output written to " << filename << std::endl;
+}
+
+
 
 int get_number_of_nodes_from_node_file(int& number_of_zones, int& l_FirstThruNode)
 {
@@ -598,7 +736,8 @@ void read_settings_file()
             parser_settings.GetValueByFieldName("demand_period_ending_hours", demand_period_ending_hours);
             parser_settings.GetValueByFieldName("log_file", g_tap_log_file);
             parser_settings.GetValueByFieldName("base_demand_mode", g_base_demand_mode);
-
+            parser_settings.GetValueByFieldName("route_output", shortest_path_log_flag);
+            
         }
 
         parser_settings.CloseCSVFile();
@@ -646,6 +785,22 @@ void read_mode_type_file()
     }
     return;
 }
+// Initialize the 5D vector
+void InitializeLinkIndices(int num_modes, int no_zones, int max_routes)
+{
+    linkIndices = std::vector<std::vector<std::vector<std::vector<std::vector<int>>>>>(
+        num_modes + 1,
+        std::vector<std::vector<std::vector<std::vector<int>>>>(
+            no_zones + 1,
+            std::vector<std::vector<std::vector<int>>>(
+                no_zones + 1,
+                std::vector<std::vector<int>>(
+                    max_routes + 1
+                )
+            )
+        )
+    );
+}
 
 int main(int argc, char** argv)
 {
@@ -688,6 +843,9 @@ int main(int argc, char** argv)
 
 
     Init(number_of_modes, no_zones);
+
+    InitializeLinkIndices(number_of_modes,no_zones, AssignIterations);
+
     int iteration_no = 0;
     MainVolume = (double*)Alloc_1D(number_of_links, sizeof(double));
     SDVolume = SubVolume = (double*)Alloc_1D(
@@ -737,7 +895,7 @@ int main(int argc, char** argv)
     fprintf(link_performance_file, "\n"); 
 
     system_least_travel_time = FindMinCostRoutes(MDMinPathPredLink);
-    Assign_with_Baseline_Volume(iteration_no, MDDiffODflow, MDMinPathPredLink, MainVolume);  // here we use MDDiffODflow as our OD search direction of D^c - D^b, reutn
+    Assign_with_Baseline_Volume(iteration_no, MDDiffODflow, MDMinPathPredLink, MainVolume);  // here we use MDDiffODflow as our OD search direction of D^c - D^b,
 
 
 
@@ -783,8 +941,8 @@ int main(int argc, char** argv)
     {
         system_least_travel_time = FindMinCostRoutes(MDMinPathPredLink);  // the one right before the assignment iteration 
 
-        All_or_Nothing_Assign(iteration_no, MDODflow, MDMinPathPredLink, SubVolume);
-        VolumeDifference(SubVolume, MainVolume, SDVolume); /* Which yields the search direction. */
+        All_or_Nothing_Assign(iteration_no, MDODflow, MDMinPathPredLink, SubVolume); // this uees D^c, subvolume is Y, 
+        VolumeDifference(SubVolume, MainVolume, SDVolume); /* Which yields the search direction. SDVolume = y-X */ 
         Lambda = LinksSDLineSearch(MainVolume, SDVolume);
 
         // MSA options
@@ -793,9 +951,7 @@ int main(int argc, char** argv)
 
 
 
- 
-
-        UpdateVolume(MainVolume, SDVolume, Lambda);
+         UpdateVolume(MainVolume, SDVolume, Lambda);  // x(k+1) = x(k) +lambda * (y-x) MainVolume is MainVolume
         system_wide_travel_time = UpdateLinkCost(MainVolume);
 
         //system_least_travel_time = FindMinCostRoutes(MinPathPredLink);  // the one right after the updated link cost 
@@ -935,6 +1091,10 @@ int main(int argc, char** argv)
        fprintf(link_performance_file, "\n"); 
     }
 
+    if(shortest_path_log_flag)
+    { 
+    OutputRouteDetails("route_assignment.csv");
+    }
     free(MainVolume);
     free(SubVolume);
     Free_3D((void***)MDMinPathPredLink, number_of_modes, no_zones, no_nodes);
@@ -1656,6 +1816,29 @@ double OFscale = 1.0;
 
 double OF_LinksDirectionalDerivative(double* MainVolume, double* SDVolume, double Lambda)
 {
+//
+//purpose:
+//    this function calculates the directional derivative of the objective function with respect to the step size lambda.in optimization, the directional derivative indicates how the objective function changes as you move in a specific direction.
+//
+//        parameters :
+//        mainvolume : current flow volumes on each link.
+//        sdvolume : search direction volumes(difference between aon assignment and current flows).
+//        lambda : step size parameter indicating how far to move along the search direction.
+
+    //Return Normalized Directional Derivative :
+    //Normalize the sum by OFscale to get the directional derivative :
+    //DirectionalDerivative
+    //    =
+    //    LinkCostSum
+    //    OFscale
+    //    DirectionalDerivative =
+    //    OFscale
+    //    LinkCostSum
+    //    ?
+
+    //    Mathematical Interpretation :
+    //The directional derivative represents how the total system cost changes as you adjust the flow along the search direction by Lambda.In the context of traffic assignment, it helps determine whether increasing or decreasing Lambda will reduce the overall congestion and travel time.
+
     int k;
     double* Volume;
     double LinkCostSum = 0;

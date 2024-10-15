@@ -1,0 +1,4 @@
+no_nodes= 12982, no_zones = 1778, FirstThruNode (seq No) = 1779, number_of_links = 39018
+iter No = 0, sys. TT =  14882002.554027, least TT =  13609866.869644, gap = 9.347157 %
+iter No = 1, Lambda = 0.031250, sys. TT =  14770580.207568, least TT =  14550749.423793, gap = 1.510787 % 
+CPU running time: 0 hours 0 minutes 5 seconds 245 ms
