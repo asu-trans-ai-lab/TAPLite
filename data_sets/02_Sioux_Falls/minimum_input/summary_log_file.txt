@@ -19,4 +19,4 @@ iter No = 16, Lambda = 0.031250, sys. TT =  7514800.738530, least TT =  7464350.
 iter No = 17, Lambda = 0.031250, sys. TT =  7515406.059691, least TT =  7466408.213395, gap = 0.656244 % 
 iter No = 18, Lambda = 0.031250, sys. TT =  7510745.031578, least TT =  7468406.042321, gap = 0.566908 % 
 iter No = 19, Lambda = 0.031250, sys. TT =  7510054.737617, least TT =  7466447.925226, gap = 0.584037 % 
-CPU running time: 0 hours 0 minutes 0 seconds 26 ms
+CPU running time: 0 hours 0 minutes 0 seconds 3 ms
