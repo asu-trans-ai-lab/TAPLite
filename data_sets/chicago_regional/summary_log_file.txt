@@ -1,2 +1,10 @@
 no_nodes= 12982, no_zones = 1778, FirstThruNode (seq No) = 1779, number_of_links = 39018
 iter No = 0, sys. TT =  14882002.554027, least TT =  13609866.869644, gap = 9.347157 %
+iter No = 1, Lambda = 0.031250, g_System_VMT = 7114295.084483, sys. TT =  14770580.207568, least TT =  14550749.423793, gap = 1.510787 % 
+iter No = 2, Lambda = 0.062500, g_System_VMT = 7113549.726509, sys. TT =  14652625.286085, least TT =  14572913.520707, gap = 0.546986 % 
+iter No = 3, Lambda = 0.062500, g_System_VMT = 7112606.631414, sys. TT =  14597844.143722, least TT =  14490055.359650, gap = 0.743881 % 
+iter No = 4, Lambda = 0.062500, g_System_VMT = 7111648.771895, sys. TT =  14563250.090479, least TT =  14464550.617933, gap = 0.682354 % 
+iter No = 5, Lambda = 0.062500, g_System_VMT = 7110820.552420, sys. TT =  14539962.327478, least TT =  14428372.848605, gap = 0.773403 % 
+iter No = 6, Lambda = 0.031250, g_System_VMT = 7109568.158756, sys. TT =  14523663.560670, least TT =  14420236.740514, gap = 0.717234 % 
+iter No = 7, Lambda = 0.093750, g_System_VMT = 7109335.033114, sys. TT =  14510780.241340, least TT =  14428038.507994, gap = 0.573479 % 
+iter No = 8, Lambda = 0.031250, g_System_VMT = 7107999.067797, sys. TT =  14491865.565807, least TT =  14369865.399712, gap = 0.849000 % 

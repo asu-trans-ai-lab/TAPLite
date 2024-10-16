@@ -442,8 +442,12 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
     //StatusMessage("Assign", "Starting assign.");
     for(int m = 1; m <= number_of_modes; m++)
     { 
+
+#pragma omp for
     for (Orig = 1; Orig <= no_zones; Orig++)
     {
+
+
         //	printf("Assign", "Assigning origin %6d.", Orig);
         for (Dest = 1; Dest <= no_zones; Dest++)
         {
