@@ -139,6 +139,7 @@ struct mode_type {
     float vot;
     float pce;
     float occ;
+    int dedicated_shortest_path;
     std::string demand_file;
 };
 
@@ -212,7 +213,7 @@ double g_System_VMT = 0;
 
 double g_ODME_link_volume_penalty = 0.01;  // relative weight on volume , convert the deviation of link volume to the travel time 
 double g_ODME_VMT_penalty = 0.01;  // relative weight on VMT , convert the deviation of VMT to the travel time 
-
+FILE* summary_log_file;
 
 
 double** ODflow, TotalODflow;
@@ -344,20 +345,25 @@ Output:	RouteCost - route generalized cost, by origin and destination
 double FindMinCostRoutes(int*** MinPathPredLink)
 {
 
+
+
     double** CostTo;
 
     CostTo = (double**)Alloc_2D(no_zones, no_nodes, sizeof(double));
     StatusMessage("Minpath", "Starting the minpath calculations.");
     double* system_least_travel_time_org_zone = (double*)Alloc_1D(no_zones, sizeof(double));
 
-#pragma omp for
+#pragma omp parallel for
     for (int Orig = 1; Orig <= no_zones; Orig++)
     {
+
+
         system_least_travel_time_org_zone[Orig] = 0;  // reset it before mode based computing 
 
         for(int m = 1; m <= number_of_modes; m++)
         {
-
+            if (g_mode_type_vector[m].dedicated_shortest_path == 0)  // skip the shortest path computing
+                continue; 
 
         Minpath(m, Orig, MinPathPredLink[m][Orig], CostTo[Orig]);
         if (MDRouteCost != NULL )
@@ -427,23 +433,31 @@ void AddLinkSequence(int m, int Orig, int Dest, int route_id, const std::vector<
 
 void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int*** MinPathPredLink, double* Volume)
 {
-    int Dest, Orig, k;
-    int CurrentNode;
-    double RouteFlow;
 
+    double** ModeVolume;
 
-    for (k = 1; k <= number_of_links; k++)
+    ModeVolume = (double**)Alloc_2D(number_of_links, number_of_modes, sizeof(double));
+#pragma omp parallel for
+    for (int k = 1; k <= number_of_links; k++)
     {
         Volume[k] = 0;  
 
         for (int m = 1; m <= number_of_modes; m++)
+        {
             Link[k].mode_SubVolume[m] = 0.0;
+            ModeVolume[k][m] = 0;
+        }
     }
     //StatusMessage("Assign", "Starting assign.");
+#pragma omp parallel for
     for(int m = 1; m <= number_of_modes; m++)
     { 
 
-#pragma omp for
+        int Dest, Orig, k;
+        int CurrentNode;
+        double RouteFlow;
+        std::vector<int> currentLinkSequence; // Temporary vector to store link indices
+
     for (Orig = 1; Orig <= no_zones; Orig++)
     {
 
@@ -454,35 +468,53 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
             if (Dest == Orig)
                 continue;
 
+            if (shortest_path_log_flag)
+                currentLinkSequence.clear();
+
             RouteFlow = ODflow[m][Orig][Dest];  //test
             if (RouteFlow == 0)
                 continue;
 
-            if (MDRouteCost[m][Orig][Dest] >= BIGM - 1)  // if feasible 
-                continue; 
+            if (g_mode_type_vector[m].dedicated_shortest_path == 0)  // skip the shortest path computing
+            {
+                if (MDRouteCost[1][Orig][Dest] >= BIGM - 1)  // if feasible 
+                    continue;
+            }
+            else
+            {
+                if (MDRouteCost[m][Orig][Dest] >= BIGM - 1)  // if feasible 
+                    continue;
+            }
 
             CurrentNode = Dest;
             //double total_travel_time = 0;
             //double total_length = 0;
             //double total_FFTT = 0;
-            std::vector<int> currentLinkSequence; // Temporary vector to store link indices
 
             while (CurrentNode != Orig)
             {
-                k = MinPathPredLink[m][Orig][CurrentNode];
+                if (g_mode_type_vector[m].dedicated_shortest_path == 0)  // skip the shortest path computing
+                    k = MinPathPredLink[1][Orig][CurrentNode];  // default to mode 1
+                else
+                    k = MinPathPredLink[m][Orig][CurrentNode];
+
                 if (k == INVALID)
                 {
                     printf("A problem in mincostroutes.c (Assign): Invalid pred for node %d Orig%d \n\n", CurrentNode, Orig);
                     break;
                 }
-                Volume[k] += RouteFlow * g_mode_type_vector[m].pce;
+                ModeVolume[k][m] += RouteFlow * g_mode_type_vector[m].pce;
                 Link[k].mode_SubVolume[m]+= RouteFlow;  // pure volume 
 
                 CurrentNode = Link[k].internal_from_node_id;
 
                 if (shortest_path_log_flag)
                 {
+#pragma omp critical
+                    {
                     currentLinkSequence.push_back(k); // Store the link index
+                    }
+                
                 }
             }
 
@@ -497,45 +529,73 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
     }
     }
 
-    /*	fclose(logfile_od)*/;
+#pragma omp parallel for
+    for (int k = 1; k <= number_of_links; k++)
+    {
+        for (int m = 1; m <= number_of_modes; m++)
+            Volume[k] += ModeVolume[k][m];
+    }
+    Free_2D((void**)ModeVolume, number_of_links, number_of_modes);
     StatusMessage("Assign", "Finished assign.");
 }
 
 
 void Assign_with_Baseline_Volume(int Assignment_iteration_no, double*** ODflow, int*** MinPathPredLink, double* Volume)
 {
-    int Dest, Orig, k;
-    int CurrentNode;
-    double RouteFlow;
+
+    double** ModeVolume;
+
+    ModeVolume = (double**)Alloc_2D(number_of_links, number_of_modes, sizeof(double));
 
 
-
-    for (k = 1; k <= number_of_links; k++)
+#pragma omp parallel for
+    for (int k = 1; k <= number_of_links; k++)
     {
         Volume[k] = Link[k].Base_volume;  // use the base as the intial volume before OD, route flow assignment 
 
         for (int m = 1; m <= number_of_modes; m++)
-            Link[k].mode_SubVolume[m] = Link[k].mode_Base_Volume[m];
+        {
+        Link[k].mode_SubVolume[m] = Link[k].mode_Base_Volume[m];
+        ModeVolume[k][m] = 0;
+        }
     }
     //StatusMessage("Assign", "Starting assign.");
+#pragma omp parallel for
     for (int m = 1; m <= number_of_modes; m++)
     {
+
+        int Dest, Orig, k;
+
+        int CurrentNode;
+        double RouteFlow;
+        std::vector<int> currentLinkSequence; // Temporary vector to store link indices
+
         for (Orig = 1; Orig <= no_zones; Orig++)
         {
+
+
             //	printf("Assign", "Assigning origin %6d.", Orig);
             for (Dest = 1; Dest <= no_zones; Dest++)
             {
-                std::vector<int> currentLinkSequence; // Temporary vector to store link indices
                 if (Dest == Orig)
                     continue;
 
                 RouteFlow = ODflow[m][Orig][Dest];  //test
                 if (RouteFlow == 0)
                     continue;
-
-                if (MDRouteCost[m][Orig][Dest] >= BIGM - 1)  // if feasible 
-                    continue;
-
+                if (g_mode_type_vector[m].dedicated_shortest_path == 0)  // skip the shortest path computing
+                {
+                    if (MDRouteCost[1][Orig][Dest] >= BIGM - 1)  // if feasible 
+                        continue;
+                }
+                else
+                {
+                    if (MDRouteCost[m][Orig][Dest] >= BIGM - 1)  // if feasible 
+                        continue;
+                };
+                if (shortest_path_log_flag)
+                    currentLinkSequence.clear();
+ 
                 CurrentNode = Dest;
                 //double total_travel_time = 0;
                 //double total_length = 0;
@@ -543,13 +603,16 @@ void Assign_with_Baseline_Volume(int Assignment_iteration_no, double*** ODflow, 
 
                 while (CurrentNode != Orig)
                 {
-                    k = MinPathPredLink[m][Orig][CurrentNode];
+                    if (g_mode_type_vector[m].dedicated_shortest_path == 0)  // skip the shortest path computing
+                        k = MinPathPredLink[1][Orig][CurrentNode];  // default to mode 1
+                    else
+                        k = MinPathPredLink[m][Orig][CurrentNode];
                     if (k == INVALID)
                     {
                         printf("A problem in mincostroutes.c (Assign): Invalid pred for node %d Orig%d \n\n", CurrentNode, Orig);
                         break;
                     }
-                    Volume[k] += RouteFlow * g_mode_type_vector[m].pce;
+                    ModeVolume[k][m] += RouteFlow * g_mode_type_vector[m].pce;
                     Link[k].mode_MainVolume[m] += RouteFlow;  // pure volume 
 
                     CurrentNode = Link[k].internal_from_node_id;
@@ -561,14 +624,23 @@ void Assign_with_Baseline_Volume(int Assignment_iteration_no, double*** ODflow, 
                 }
                 if (shortest_path_log_flag)
                 {
-                    AddLinkSequence(m, Orig, Dest, Assignment_iteration_no, currentLinkSequence);
-                    // Store the link sequence for this OD pair
+#pragma omp critical
+                    {
+                        AddLinkSequence(m, Orig, Dest, Assignment_iteration_no, currentLinkSequence);
+                        // Store the link sequence for this OD pair
+                    }
 
                 }
             }
         }
     }
-
+#pragma omp parallel for
+    for (int k = 1; k <= number_of_links; k++)
+    {
+           for (int m = 1; m <= number_of_modes; m++)
+            Volume[k] += ModeVolume[k][m];
+    }
+    Free_2D((void**)ModeVolume, number_of_links, number_of_modes)
     /*	fclose(logfile_od)*/;
     StatusMessage("Assign", "Finished assign.");
 }
@@ -794,6 +866,13 @@ void read_mode_type_file()
             parser_mode_type.GetValueByFieldName("pce", g_mode_type_vector[number_of_modes].pce);
             parser_mode_type.GetValueByFieldName("occ", g_mode_type_vector[number_of_modes].occ);
             parser_mode_type.GetValueByFieldName("demand_file", g_mode_type_vector[number_of_modes].demand_file);
+
+            g_mode_type_vector[number_of_modes].dedicated_shortest_path = 1;
+            parser_mode_type.GetValueByFieldName("dedicated_shortest_path", g_mode_type_vector[number_of_modes].dedicated_shortest_path);
+
+            if(number_of_modes == 1)
+                g_mode_type_vector[1].dedicated_shortest_path = 1;  // reset; 
+
             }
 
         }
@@ -808,6 +887,7 @@ void read_mode_type_file()
         g_mode_type_vector[1].vot = 10;
         g_mode_type_vector[1].pce = 1;
         g_mode_type_vector[1].occ = 1;
+        g_mode_type_vector[1].dedicated_shortest_path = 1;  // reset; 
         number_of_modes = 1;
     }
     return;
@@ -831,7 +911,7 @@ void InitializeLinkIndices(int num_modes, int no_zones, int max_routes)
 
 int main(int argc, char** argv)
 {
-    FILE* summary_log_file;
+
     fopen_s(&summary_log_file, "summary_log_file.txt", "w");
     
     double* MainVolume, * SubVolume, * SDVolume, Lambda;
@@ -871,8 +951,10 @@ int main(int argc, char** argv)
 
     Init(number_of_modes, no_zones);
 
+    if(shortest_path_log_flag)
+    {
     InitializeLinkIndices(number_of_modes,no_zones, AssignIterations);
-
+    }
     int iteration_no = 0;
     MainVolume = (double*)Alloc_1D(number_of_links, sizeof(double));
     SDVolume = SubVolume = (double*)Alloc_1D(
@@ -1460,6 +1542,7 @@ int Read_ODtable(double*** ODtable, double*** DiffODtable, int no_zones)
     FILE* file;
     fopen_s(&file, g_mode_type_vector[m].demand_file.c_str(), "r");
     printf("read demand file %s\n", g_mode_type_vector[m].demand_file.c_str());
+    fprintf(summary_log_file, "read demand file %s\n", g_mode_type_vector[m].demand_file.c_str());
 
     if (file == NULL)
     {
@@ -1484,6 +1567,22 @@ int Read_ODtable(double*** ODtable, double*** DiffODtable, int no_zones)
     int result;
     while ((result = fscanf(file, "%d,%d,%lf", &o_zone_id, &d_zone_id, &volume)) != EOF)
     {
+        if (o_zone_id > no_zones)
+        {
+            printf("o_zone_id: %d, d_zone_id: %d, volume: %.4lf\n", o_zone_id, d_zone_id,
+                volume);
+            printf("Error o_zone_id %d  > # of zones %d \n", o_zone_id, no_zones);
+            break;
+        }
+        if (d_zone_id > no_zones)
+        {
+            printf("o_zone_id: %d, d_zone_id: %d, volume: %.4lf\n", o_zone_id, d_zone_id,
+                volume);
+            printf("Error d_zone_id %d  > # of zones %d \n", d_zone_id, no_zones);
+            break;
+        }
+
+
         if (result == 3)  // we have read all the 3 values correctly
         {
             if (line_count <= 3)
@@ -1505,6 +1604,7 @@ int Read_ODtable(double*** ODtable, double*** DiffODtable, int no_zones)
     }
 
     printf(" mode type = %s, total_volume = %f\n", g_mode_type_vector[m].mode_type.c_str(), total_volume);
+    fprintf(summary_log_file, " mode type = %s, total_volume = %f\n", g_mode_type_vector[m].mode_type.c_str(), total_volume);
 
     fclose(file);
 
