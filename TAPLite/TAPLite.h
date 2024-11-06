@@ -505,7 +505,7 @@ void** Alloc_2D(int dim1, int dim2, size_t size) {
         ExitMessage("Cannot allocate memory for two-dimensional array of size %d by %d.\n", dim1, dim2);
     }
 
-    for (i = 1; i <= dim1; i++) {
+    for (i = 0; i <= dim1; i++) {
         Array[i] = (void*)calloc(dim2 + 1, size);
         if (Array[i] == NULL) {
             ExitMessage("Cannot allocate memory for two-dimensional array of size %d by %d.\n", dim1, dim2);
@@ -518,7 +518,7 @@ void** Alloc_2D(int dim1, int dim2, size_t size) {
 void Free_2D(void** Array, int dim1, int dim2) {
     int i;  // Loop variable declared outside for efficiency
 
-    for (i = 1; i <= dim1; i++) {
+    for (i = 0; i <= dim1; i++) {
         free(Array[i]);
     }
     free(Array);
@@ -533,13 +533,13 @@ void*** Alloc_3D(int dim1, int dim2, int dim3, size_t size) {
         ExitMessage("Cannot allocate memory for three-dimensional array of size %d by %d by %d.\n", dim1, dim2, dim3);
     }
 
-    for (i = 1; i <= dim1; i++) {
+    for (i = 0; i <= dim1; i++) {
         Array[i] = (void**)calloc(dim2 + 1, sizeof(void*));
         if (Array[i] == NULL) {
             ExitMessage("Cannot allocate memory for two-dimensional array of size %d by %d.\n", dim1, dim2);
         }
 
-        for (j = 1; j <= dim2; j++) {
+        for (j = 0; j <= dim2; j++) {
             Array[i][j] = (void*)calloc(dim3 + 1, size);
             if (Array[i][j] == NULL) {
                 ExitMessage("Cannot allocate memory for one-dimensional array of size %d.\n", dim3);
@@ -555,8 +555,8 @@ void Free_3D(void*** Array, int dim1, int dim2, int dim3) {
     void* p;    // Pointer variable declared outside the loop for efficiency
 
     // Free the innermost arrays (1D arrays)
-    for (i = 1; i <= dim1; i++) {
-        for (j = 1; j < dim2; j++) {
+    for (i = 0; i <= dim1; i++) {
+        for (j = 0; j < dim2; j++) {
             p = Array[i][j];
             free(p);
         }

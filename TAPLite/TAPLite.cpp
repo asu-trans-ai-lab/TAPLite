@@ -217,7 +217,8 @@ FILE* summary_log_file;
 
 
 double** ODflow, TotalODflow;
-
+double* TotalOFlow;
+int* zone_outbound_link_size;
 
 double*** MDODflow;
 double*** MDDiffODflow;  // D^c - D^b
@@ -429,6 +430,9 @@ std::vector<std::vector<std::vector<std::vector<std::vector<int>>>>> linkIndices
 
 void AddLinkSequence(int m, int Orig, int Dest, int route_id, const std::vector<int>& linkIDs)
 {
+	if (linkIndices.size() == 0)
+		return; 
+
 	// Ensure we are within bounds before adding the link sequence
 	if (Orig > 0 && Orig < linkIndices[m].size() &&
 		Dest > 0 && Dest < linkIndices[m][Orig].size() &&
@@ -448,14 +452,27 @@ void AddLinkSequence(int m, int Orig, int Dest, int route_id, const std::vector<
 
 void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int*** MinPathPredLink, double* Volume)
 {
+	printf("All or nothing assignment\n");
 
+	auto start0 = std::chrono::high_resolution_clock::now();
 	double** ProcessorVolume;
 	double*** ProcessorModeVolume;
 
 
 	ProcessorVolume = (double**)Alloc_2D(number_of_links, g_number_of_processors, sizeof(double));
-	ProcessorModeVolume = (double***)Alloc_3D(number_of_links, number_of_modes, g_number_of_processors, sizeof(double));
 
+	if (ProcessorVolume == nullptr) {
+		std::cerr << "Error: Memory allocation for ProcessorVolume failed." << std::endl;
+		// Handle the error, e.g., exit the program, clean up resources, etc.
+		exit(EXIT_FAILURE);
+	}
+
+	ProcessorModeVolume = (double***)Alloc_3D(number_of_links, number_of_modes, g_number_of_processors, sizeof(double));
+	if (ProcessorModeVolume == nullptr) {
+		std::cerr << "Error: Memory allocation for ProcessorModeVolume failed." << std::endl;
+		// Handle the error, e.g., exit the program, clean up resources, etc.
+		exit(EXIT_FAILURE);
+	}
 
 #pragma omp parallel for
 	for (int k = 1; k <= number_of_links; k++)
@@ -479,6 +496,11 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
 		{
 
 			int Orig = Processor_origin_zones[p][i];  // get origin zone id
+			
+
+			if (zone_outbound_link_size[Orig] == 0)  // there is no outbound link from the origin 
+				continue; 
+
 
 			int Dest, k;
 			int CurrentNode;
@@ -496,6 +518,8 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
 				{
 					if (Dest == Orig)
 						continue;
+
+
 
 					if (shortest_path_log_flag || Assignment_iteration_no == 0)
 						currentLinkSequence.clear();
@@ -527,7 +551,7 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
 						else
 							k = MinPathPredLink[m][Orig][CurrentNode];
 
-						if (k == INVALID)
+						if (k <= 0 || k > number_of_links || k == INVALID)
 						{
 							printf("A problem in mincostroutes.c (Assign): Invalid pred for node %d Orig%d \n\n", CurrentNode, Orig);
 							break;
@@ -537,6 +561,14 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
 
 						CurrentNode = Link[k].internal_from_node_id;
 
+						if (CurrentNode <= 0 || CurrentNode > no_nodes )
+						{
+							printf("A problem in mincostroutes.c (Assign): Invalid node %d Orig%d \n\n", CurrentNode, Orig);
+							break;
+						}
+
+						if(linkIndices.size() >0)
+						{
 						if (shortest_path_log_flag || Assignment_iteration_no == 0)
 						{
 #pragma omp critical
@@ -547,12 +579,16 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
 						}
 					}
 
-					if (shortest_path_log_flag || Assignment_iteration_no == 0)
-					{
-						AddLinkSequence(m, Orig, Dest, Assignment_iteration_no, currentLinkSequence);
-						// Store the link sequence for this OD pair
+							if (linkIndices.size() > 0)
+							{
+						if (shortest_path_log_flag || Assignment_iteration_no == 0)
+						{
+							AddLinkSequence(m, Orig, Dest, Assignment_iteration_no, currentLinkSequence);
+							// Store the link sequence for this OD pair
 
-					}
+						}
+						}
+						}
 
 				}
 			}
@@ -614,7 +650,22 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
 
 	Free_2D((void**)ProcessorVolume, number_of_links, g_number_of_processors);
 	Free_3D((void***)ProcessorModeVolume, number_of_links, number_of_modes, g_number_of_processors);
-	StatusMessage("Assign", "Finished assign.");
+
+	auto end0 = std::chrono::high_resolution_clock::now();
+
+	// Calculate the duration in milliseconds
+
+	// Calculate the duration in seconds
+	auto duration = end0 - start0;
+
+	// Convert to hours, minutes, seconds
+	auto hours = std::chrono::duration_cast<std::chrono::hours>(duration);
+	auto minutes = std::chrono::duration_cast<std::chrono::minutes>(duration % std::chrono::hours(1));
+	auto seconds = std::chrono::duration_cast<std::chrono::seconds>(duration % std::chrono::minutes(1));
+	auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(duration % std::chrono::seconds(1));
+
+	printf("All or nothing assignment: %lld hours %lld minutes %lld seconds %lld ms\n", hours.count(), minutes.count(), seconds.count(), milliseconds.count());
+
 }
 
 
@@ -635,6 +686,8 @@ void OutputRouteDetails(const std::string& filename)
 {
 	std::ofstream outputFile(filename);  // Open the file for writing
 
+	if (linkIndices.size() == 0)
+		return; 
 	// Write the CSV header in lowercase
 	outputFile << "mode,route_id,o_zone_id,d_zone_id,unique_route_id,node_ids,link_ids,total_distance,total_free_flow_travel_time,total_travel_time,route_key\n";
 
@@ -750,13 +803,13 @@ void OutputODPerformance(const std::string& filename)
 						std::string nodeIDsStr;
 						std::string linkIDsStr;
 
-						int nodeSum = 0;  // Sum of node IDs
-						int linkSum = 0;  // Sum of link IDs
+						long nodeSum = 0;  // Sum of node IDs
+						long linkSum = 0;  // Sum of link IDs
 
 						// Collect node IDs, link indices, compute total distance, travel times, and calculate sums
 						for (int i = linkIndices[m][Orig][Dest][route_id].size() - 1; i >= 0; --i)
 						{
-							int k = linkIndices[m][Orig][Dest][route_id][i];
+							long k = linkIndices[m][Orig][Dest][route_id][i];
 
 							// Append the from_node_id for each link and calculate the node sum
 							int fromNodeID = Link[k].external_from_node_id;
@@ -837,6 +890,10 @@ int get_number_of_nodes_from_node_file(int& number_of_zones, int& l_FirstThruNod
 			parser_node.GetValueByFieldName("node_id", node_id);
 			parser_node.GetValueByFieldName("zone_id", zone_id);
 
+			if (zone_id >= 1 && zone_id != node_id)
+			{
+				printf("Error: zone_id should be the same as node_id but zone_id  = %d, node_id = %d\n", zone_id, node_id);
+			}
 			g_map_node_seq_no_2_external_node_id[number_of_nodes + 1] = node_id;
 			g_map_external_node_id_2_node_seq_no[node_id] =
 				number_of_nodes + 1;  // this code node sequential number starts from 1
@@ -1003,6 +1060,12 @@ void read_mode_type_file()
 // Initialize the 5D vector
 void InitializeLinkIndices(int num_modes, int no_zones, int max_routes)
 {
+
+
+	auto start = std::chrono::high_resolution_clock::now();  // Start timing
+
+
+
 	linkIndices = std::vector<std::vector<std::vector<std::vector<std::vector<int>>>>>(
 		num_modes + 1,
 		std::vector<std::vector<std::vector<std::vector<int>>>>(
@@ -1015,6 +1078,22 @@ void InitializeLinkIndices(int num_modes, int no_zones, int max_routes)
 			)
 		)
 	);
+
+	// Record the end time
+	auto end = std::chrono::high_resolution_clock::now();
+
+	// Calculate the duration in milliseconds
+
+	// Calculate the duration in seconds
+	auto duration = end - start;
+
+	// Convert to hours, minutes, seconds
+	auto hours = std::chrono::duration_cast<std::chrono::hours>(duration);
+	auto minutes = std::chrono::duration_cast<std::chrono::minutes>(duration % std::chrono::hours(1));
+	auto seconds = std::chrono::duration_cast<std::chrono::seconds>(duration % std::chrono::minutes(1));
+	auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(duration % std::chrono::seconds(1));
+
+	printf("Memmory creation time for 5D link path matrix: %lld hours %lld minutes %lld seconds %lld ms\n", hours.count(), minutes.count(), seconds.count(), milliseconds.count());
 }
 
 int main(int argc, char** argv)
@@ -1060,7 +1139,7 @@ int main(int argc, char** argv)
 	Init(number_of_modes, no_zones);
 
 
-InitializeLinkIndices(number_of_modes, no_zones, AssignIterations);
+   //   InitializeLinkIndices(number_of_modes, no_zones, AssignIterations);
 
 
 		for (int Orig = 1; Orig <= no_zones; Orig++)  // initialization 
@@ -1405,6 +1484,7 @@ static void Close()
 static void CloseODflow(void)
 {
 
+	free(TotalOFlow);
 
 	Free_3D((void***)MDODflow, number_of_modes, no_zones, no_zones);
 	Free_3D((void***)MDDiffODflow, number_of_modes, no_zones, no_zones);
@@ -1454,13 +1534,32 @@ void ReadLinks()
 
 			if (g_map_external_node_id_2_node_seq_no.find(Link[k].external_from_node_id) !=
 				g_map_external_node_id_2_node_seq_no.end())
+			{
 				Link[k].internal_from_node_id =
 				g_map_external_node_id_2_node_seq_no[Link[k].external_from_node_id];
+			}
+			else
+			{
+				printf("Error in from_node_id =%d for link_id = %d\n", Link[k].external_from_node_id, Link[k].link_id);
 
+				continue; 
+			}
+
+			if (Link[k].internal_from_node_id == 0)
+			{
+				printf("Error in Link[k].internal_from_node_id\n"); 
+			}
 			if (g_map_external_node_id_2_node_seq_no.find(Link[k].external_to_node_id) !=
 				g_map_external_node_id_2_node_seq_no.end())
+			{
 				Link[k].internal_to_node_id =
 				g_map_external_node_id_2_node_seq_no[Link[k].external_to_node_id];
+			}
+			else
+			{
+				printf("Error in to_node_id =%d for link_id = %d\n", Link[k].external_to_node_id, Link[k].link_id);
+				continue;
+			}
 
 			parser_link.GetValueByFieldName("length", Link[k].length);
 			parser_link.GetValueByFieldName("ref_volume", Link[k].Ref_volume);
@@ -1638,6 +1737,9 @@ static void InitLinkPointers(char* LinksFileName)
 			LastLinkFrom[Node] = -1;
 		}
 	}
+
+
+
 }
 
 void FindLinksTo(void)
@@ -2162,15 +2264,22 @@ double OF_LinksDirectionalDerivative(double* MainVolume, double* SDVolume, doubl
 	return LinkCostSum / OFscale;
 }
 
-double Sum_ODtable(double*** ODtable, int no_zones)
+double Sum_ODtable(double*** ODtable, double* total_o_table, int no_zones)
 {
 	int Orig, Dest;
 	double sum = 0.0;
 
+	for (Orig = 1; Orig <= no_zones; Orig++)
+		total_o_table[Orig] = 0;
+
 	for (int m = 1; m <= number_of_modes; m++)
 		for (Orig = 1; Orig <= no_zones; Orig++)
 			for (Dest = 1; Dest <= no_zones; Dest++)
+			{
+				total_o_table[Orig] += ODtable[m][Orig][Dest];
 				sum += ODtable[m][Orig][Dest];
+			}
+
 
 	return (sum);
 }
@@ -2181,15 +2290,47 @@ int Read_ODflow(double* TotalODflow, int* number_of_modes, int* no_zones)
 	double RealTotal, InputTotal;
 
 	MDODflow = (double***)Alloc_3D(*number_of_modes, *no_zones, *no_zones, sizeof(double));
+	TotalOFlow = (double*)Alloc_1D(*no_zones, sizeof(double));
+
 	MDDiffODflow = (double***)Alloc_3D(*number_of_modes, *no_zones, *no_zones, sizeof(double));
 
 	MDRouteCost = (double***)Alloc_3D(*number_of_modes, *no_zones, *no_zones, sizeof(double));
 
 	int with_basedemand = Read_ODtable(MDODflow, MDDiffODflow, *no_zones);
 
-	RealTotal = (double)Sum_ODtable(MDODflow, *no_zones);
+	RealTotal = (double)Sum_ODtable(MDODflow, TotalOFlow, *no_zones);
+
+
+	zone_outbound_link_size = (int*)Alloc_1D(*no_zones, sizeof(int));
+
+	for (int n = 1; n <= *no_zones; n++)
+	{
+		zone_outbound_link_size[n] = 0;
+	}
+	for (int k = 1; k <= number_of_links; k++)
+	{
+		int from_node_id = Link[k].external_from_node_id;
+		if (from_node_id <= *no_zones)
+		{
+			zone_outbound_link_size[from_node_id] += 1;  // from_node_id is the zone_id; 
+		}
+	}
+
+	
+
+	// checking 
+	for (int z = 1; z < *no_zones; z++)
+	{
+		if (zone_outbound_link_size[z] == 0 && TotalOFlow[z]>0.01)
+		{
+			printf("Error: There is no outbound link from zone %d with positive demand %f\n", z, TotalOFlow[z]);
+
+		}
+
+	}
 
 	*TotalODflow = (double)RealTotal;
+
 	return with_basedemand;
 
 }
@@ -2209,7 +2350,7 @@ void ExitMessage(const char* format, ...)
 void CloseLinks(void)
 {
 	int Node;
-
+	free(zone_outbound_link_size);
 	free(Link);
 	free(FirstLinkFrom);
 	free(LastLinkFrom);
