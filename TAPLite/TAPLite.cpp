@@ -249,6 +249,8 @@ double Link_QueueVDF(int k, double Volume, double& IncomingDemand, double& DOC, 
 int Minpath(int mode, int Orig, int* PredLink, double* CostTo)
 {
 	int node, now, NewNode, k, Return2Q_Count = 0;
+	// Orig is the zone number 
+	// now is the internal node id (Seq. no)
 	double NewCost;
 	int* QueueNext;
 	int QueueFirst, QueueLast;
@@ -262,7 +264,8 @@ int Minpath(int mode, int Orig, int* PredLink, double* CostTo)
 		PredLink[node] = INVALID;
 	}
 
-	now = Orig;
+	now = g_map_external_node_id_2_node_seq_no[Orig];  // mapping from external zone id of Orig (which is defined in demand.csv_ to the corresponding node id (== zone_id) and then to the node internal number 
+	int internal_node_id_for_origin_zone = now;
 	QueueNext[now] = WAS_IN_QUEUE;
 	PredLink[now] = INVALID;
 	CostTo[now] = 0.0;
@@ -271,7 +274,7 @@ int Minpath(int mode, int Orig, int* PredLink, double* CostTo)
 
 	while ((now != INVALID) && (now != WAS_IN_QUEUE))
 	{
-		if (now >= FirstThruNode || now == Orig)  // this is the key implementation for FirstThruNode on connector
+		if (now >= FirstThruNode || now == internal_node_id_for_origin_zone)  // this is the key implementation for FirstThruNode on connector
 		{
 			for (k = FirstLinkFrom[now]; k <= LastLinkFrom[now]; k++)
 			{
@@ -289,7 +292,7 @@ int Minpath(int mode, int Orig, int* PredLink, double* CostTo)
 					 * the new node to the queue. */
 
 					CostTo[NewNode] = NewCost;
-					PredLink[NewNode] = k;
+					PredLink[NewNode] = k;  // PredLink is coded in terms of internal node id 
 
 					/* If the new node was in the queue before, add it as the first in the queue. */
 					if (QueueNext[NewNode] == WAS_IN_QUEUE)
@@ -367,6 +370,8 @@ double FindMinCostRoutes(int*** MinPathPredLink)
 		int Orig = Processor_origin_zones[p][i];  // get origin zone id
 
 
+		if(TotalOFlow[Orig] < 0.00001)  // only work on positive zone flow 
+			continue;
 
 		system_least_travel_time_org_zone[Orig] = 0;  // reset it before mode based computing 
 
@@ -388,9 +393,12 @@ double FindMinCostRoutes(int*** MinPathPredLink)
 							ExitMessage("Negative cost %lg from Origin %d to Destination %d.",
 								(double)CostTo[Orig][Dest], Orig, Dest);
 
-						if (CostTo[Orig][Dest] <= BIGM - 1)  // feasible cost 
+						// CostTo is coded as internal node id 
+						int  internal_node_id_for_destination_zone  = g_map_external_node_id_2_node_seq_no[Dest]; 
+
+						if (CostTo[Orig][internal_node_id_for_destination_zone] <= BIGM - 1)  // feasible cost 
 						{
-							MDRouteCost[m][Orig][Dest] = CostTo[Orig][Dest];
+							MDRouteCost[m][Orig][Dest] = CostTo[Orig][internal_node_id_for_destination_zone];
 
 							system_least_travel_time_org_zone[Orig] += MDRouteCost[m][Orig][Dest] * MDODflow[m][Orig][Dest] * g_mode_type_vector[m].pce;
 
@@ -497,6 +505,8 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
 
 			int Orig = Processor_origin_zones[p][i];  // get origin zone id
 			
+			if (TotalOFlow[Orig] < 0.00001)  // only work on positive zone flow 
+				continue;
 
 			if (zone_outbound_link_size[Orig] == 0)  // there is no outbound link from the origin 
 				continue; 
@@ -514,11 +524,10 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
 
 
 				//	printf("Assign", "Assigning origin %6d.", Orig);
-				for (Dest = 1; Dest <= no_zones; Dest++)
+				for (Dest = 1; Dest <= no_zones; Dest++)  // Dest zone 
 				{
 					if (Dest == Orig)
 						continue;
-
 
 
 					if (shortest_path_log_flag || Assignment_iteration_no == 0)
@@ -540,11 +549,15 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
 					}
 
 					CurrentNode = Dest;
+					CurrentNode = g_map_external_node_id_2_node_seq_no[Dest];  // mapping from external  zone id of Dest (which is defined in demand.csv_ to the corresponding node id (== zone_id) and then to the node internal number 
+					int internal_node_for_origin_node = g_map_external_node_id_2_node_seq_no[Orig];  // mapping from external  zone id of Orig (which is defined in demand.csv_ to the corresponding node id (== zone_id) and then to the node internal number 
+					// MinPathPredLink is coded as internal node id 
+					// 
 					//double total_travel_time = 0;
 					//double total_length = 0;
 					//double total_FFTT = 0;
 
-					while (CurrentNode != Orig)
+					while (CurrentNode != internal_node_for_origin_node)
 					{
 						if (g_mode_type_vector[m].dedicated_shortest_path == 0)  // skip the shortest path computing
 							k = MinPathPredLink[1][Orig][CurrentNode];  // default to mode 1
@@ -553,7 +566,7 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
 
 						if (k <= 0 || k > number_of_links || k == INVALID)
 						{
-							printf("A problem in mincostroutes.c (Assign): Invalid pred for node %d Orig%d \n\n", CurrentNode, Orig);
+							printf("A problem in All_or_Nothing_Assign() Invalid pred for node seq no %d Orig zone= %d \n\n", CurrentNode, Orig);
 							break;
 						}
 						ProcessorVolume[k][p] += RouteFlow * g_mode_type_vector[m].pce;
@@ -563,7 +576,7 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
 
 						if (CurrentNode <= 0 || CurrentNode > no_nodes )
 						{
-							printf("A problem in mincostroutes.c (Assign): Invalid node %d Orig%d \n\n", CurrentNode, Orig);
+							printf("A problem in All_or_Nothing_Assign() Invalid node seq no %d Orig zone = %d \n\n", CurrentNode, Orig);
 							break;
 						}
 
@@ -894,6 +907,7 @@ int get_number_of_nodes_from_node_file(int& number_of_zones, int& l_FirstThruNod
 			{
 				printf("Error: zone_id should be the same as node_id but zone_id  = %d, node_id = %d\n", zone_id, node_id);
 			}
+
 			g_map_node_seq_no_2_external_node_id[number_of_nodes + 1] = node_id;
 			g_map_external_node_id_2_node_seq_no[node_id] =
 				number_of_nodes + 1;  // this code node sequential number starts from 1
@@ -904,11 +918,21 @@ int get_number_of_nodes_from_node_file(int& number_of_zones, int& l_FirstThruNod
 			if (zone_id == 0 && l_FirstThruNode == 1 /* not initialized*/)
 				l_FirstThruNode = number_of_nodes + 1;  //use sequential node id
 
+
+			if (g_tap_log_file == 1)
+			{
+				fprintf(logfile, "node_id = %d, node_seq_no = %d\n", node_id, g_map_external_node_id_2_node_seq_no[node_id]);
+
+			}
+
 			number_of_nodes++;
 		}
 
+
 		parser_node.CloseCSVFile();
 	}
+
+
 
 	return number_of_nodes;
 }
@@ -1139,7 +1163,7 @@ int main(int argc, char** argv)
 	Init(number_of_modes, no_zones);
 
 
-   //   InitializeLinkIndices(number_of_modes, no_zones, AssignIterations);
+    InitializeLinkIndices(number_of_modes, no_zones, AssignIterations);
 
 
 		for (int Orig = 1; Orig <= no_zones; Orig++)  // initialization 
@@ -1242,18 +1266,14 @@ int main(int argc, char** argv)
 	std::chrono::duration<double, std::milli> duration_FindMinCostRoutes;
 	std::chrono::duration<double, std::milli> duration_All_or_Nothing_Assign;
 	std::chrono::duration<double, std::milli> duration_LinksSDLineSearch;
-	
+	auto start0 = std::chrono::high_resolution_clock::now();  // Start timing
+
 
 	for (iteration_no = 1; iteration_no < AssignIterations; iteration_no++)
 	{
-		auto start0 = std::chrono::high_resolution_clock::now();  // Start timing
 		system_least_travel_time = FindMinCostRoutes(MDMinPathPredLink);  // the one right before the assignment iteration 
 		
-		auto end0 = std::chrono::high_resolution_clock::now();    // End timing
 
-		duration_FindMinCostRoutes += end0 - start0;  // Compute duration in ms
-
-		auto start1 = std::chrono::high_resolution_clock::now();  // Start timing
 		g_System_VMT = 0;
 
 		for (int k = 1; k <= number_of_links; k++)
@@ -1270,7 +1290,7 @@ int main(int argc, char** argv)
 		auto start2 = std::chrono::high_resolution_clock::now();  // Start timing
 
 		VolumeDifference(SubVolume, MainVolume, SDVolume); /* Which yields the search direction. SDVolume = y-X */
-		duration_All_or_Nothing_Assign += end1 - start1;  // Compute duration in ms
+
 
 		Lambda = LinksSDLineSearch(MainVolume, SDVolume);
 	
@@ -1326,12 +1346,6 @@ int main(int argc, char** argv)
 
 
 	}
-
-	int total_time = duration_FindMinCostRoutes.count() + duration_All_or_Nothing_Assign.count() + duration_LinksSDLineSearch.count(); 
-
-	std::cout << "Time for FindMinCostRoutes: " << duration_FindMinCostRoutes.count() << " ms, " << (duration_FindMinCostRoutes.count() / total_time) * 100 << "%" << std::endl;
-	std::cout << "Time for All_or_Nothing_Assign: " << duration_All_or_Nothing_Assign.count() << " ms, " << (duration_All_or_Nothing_Assign.count() / total_time) * 100 << "%" << std::endl;
-	std::cout << "Time for LinksSDLineSearch: " << duration_LinksSDLineSearch.count() << " ms, " << (duration_LinksSDLineSearch.count() / total_time) * 100 << "%" << std::endl;
 
 
 	// Record the end time
@@ -1561,6 +1575,7 @@ void ReadLinks()
 				continue;
 			}
 
+
 			parser_link.GetValueByFieldName("length", Link[k].length);
 			parser_link.GetValueByFieldName("ref_volume", Link[k].Ref_volume);
 
@@ -1595,6 +1610,11 @@ void ReadLinks()
 			parser_link.GetValueByFieldName("free_speed", free_speed);
 			parser_link.GetValueByFieldName("allowed_use", Link[k].allowed_uses);
 
+			if (g_tap_log_file == 1)
+			{
+				fprintf(logfile, "link %d->%d, node_seq_no %d->%d\n", Link[k].external_from_node_id, Link[k].external_to_node_id, Link[k].internal_from_node_id, Link[k].internal_to_node_id);
+
+			}
 
 
 			for (int m = 1; m <= number_of_modes; m++)
@@ -1681,7 +1701,7 @@ void ReadLinks()
 static void InitLinkPointers(char* LinksFileName)
 {
 	int k, Node, internal_from_node_id;
-
+	// Node is the internal node id
 	FirstLinkFrom = (int*)Alloc_1D(no_nodes, sizeof(int));
 	LastLinkFrom = (int*)Alloc_1D(no_nodes, sizeof(int));
 
@@ -1693,16 +1713,14 @@ static void InitLinkPointers(char* LinksFileName)
 		internal_from_node_id = Link[k].internal_from_node_id;
 		if (internal_from_node_id == Node)
 			continue;
-		else if (internal_from_node_id == Node + 1)
+
+		else if (internal_from_node_id >= Node + 1)
 		{
 			LastLinkFrom[Node] = k - 1;
 			Node = internal_from_node_id;
 			FirstLinkFrom[Node] = k;
 		}
 
-		/**********************
-		CHECKING FOR SORT ERRORS AND GAPS IN THE LINKS FILE.
-		*********************/
 		else if (internal_from_node_id < Node)
 		{
 			// ExitMessage("Sort error in link file '%s': a link from node %d was found after "
@@ -1738,7 +1756,14 @@ static void InitLinkPointers(char* LinksFileName)
 		}
 	}
 
+	if (g_tap_log_file == 1)
+	{
+		for (Node = 1; Node <= no_nodes; Node++)
+		{ 
+			fprintf(logfile, "node_id = %d, FirstLinkFrom = %d, LastLinkFrom = %d \n", g_map_node_seq_no_2_external_node_id[Node], FirstLinkFrom[Node], FirstLinkFrom[Node]);
 
+		}
+	}
 
 }
 
