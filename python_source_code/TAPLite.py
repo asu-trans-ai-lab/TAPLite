@@ -8,6 +8,7 @@ Created on Tue Nov 19 16:43:15 2024
 import csv
 import os
 
+
 from collections import defaultdict
 
 import numpy as np
@@ -675,7 +676,7 @@ def minpath(mode, orig, pred_link, cost_to):
             #        continue
 
                 new_node = g_link_vector[k].internal_to_node_id
-                new_cost = cost_to[now] + g_link_vector[k].length 
+                new_cost = cost_to[now] + g_link_vector[k].Travel_time
 
                 if debug:
                     print(f"Checking link {k}: new_node={new_node}, g_link_vector[k].length  = {g_link_vector[k].length}, new_cost={new_cost:.4f}, "
@@ -868,9 +869,9 @@ def update_link_cost(main_volume):
     print(f"Total System-Wide Travel Time = {system_wide_travel_time}")
     return system_wide_travel_time
 
-def all_or_nothing_assign(assignment_iteration_no):
+def all_or_nothing_assign(assignment_iteration_no, main_volume):
     global g_link_vector, total_o_flow, number_of_zones,  number_of_modes, MDMinPathPredLink, g_zone_outbound_link_size, md_od_flow, md_route_cost, g_map_external_node_id_2_node_seq_no  
-    print("All or nothing assignment")
+    print(f"All or nothing assignment, assignment_iteration_no = {assignment_iteration_no}")
     
     # Initialize ProcessorVolume and ProcessorModeVolume
     Volume = np.zeros((number_of_links + 1))
@@ -918,15 +919,126 @@ def all_or_nothing_assign(assignment_iteration_no):
                 add_link_sequence(m, Orig, Dest, assignment_iteration_no, currentLinkSequence)
     
     # Update volumes based on iteration
-    if AssignIterations == 0:
+    if assignment_iteration_no == 0:
         for k in range(1, number_of_links + 1):
+            main_volume[k] = 0 
             for m in range(1, number_of_modes + 1):
-                g_link_vector[k].mode_MainVolume[m] += ModeVolume[k][m]
+                g_link_vector[k].mode_MainVolume[m] = ModeVolume[k][m]
+                main_volume[k] = main_volume[k]  + ModeVolume[k][m]
+                print(f"AssignIterations=0: Link {k}, Mode {m}, mode_MainVolume updated to {g_link_vector[k].mode_MainVolume[m]}")
     else:
         for k in range(1, number_of_links + 1):
+            main_volume[k] = 0 
             for m in range(1, number_of_modes + 1):
-                g_link_vector[k].mode_SubVolume[m] = 0.0
-                g_link_vector[k].mode_SubVolume[m] += ModeVolume[k][m]
+                main_volume[k] = main_volume[k]  + ModeVolume[k][m]
+                g_link_vector[k].mode_SubVolume[m] = ModeVolume[k][m]
+                print(f"AssignIterations>0: Link {k}, Mode {m}, mode_SubVolume updated to {g_link_vector[k].mode_SubVolume[m]}")
+
+
+def write_link_performance():
+    global demand_period_starting_hours, demand_period_ending_hours, g_link_vector
+    """
+    Write link performance data to a CSV file.
+
+    Parameters:
+        iteration_no: Current iteration number.
+        main_volume: List of main volumes on links.
+        links: List of link objects with attributes.
+        mode_type_vector: List of mode type objects with attributes.
+        demand_period_starting_hours: Start hour of the demand period.
+        demand_period_ending_hours: End hour of the demand period.
+    """
+    # Open files for writing and appending
+    link_performance_filename = "link_performance.csv"
+    log_filename = "TAP_log.csv"
+
+    print("g_link_vector initialization:")
+    for link in g_link_vector:
+        print(link)
+    
+    mode_type_vector = [
+        {"mode_type": "auto", "occ": 1.5},  # Example: Mode type 'car' with occupancy 1.5
+    ]
+
+    try:
+        with open(link_performance_filename, mode='w', newline='') as link_file:
+            # Write headers
+            writer = csv.writer(link_file)
+            headers = [
+                "iteration_no", "link_id", "from_node_id", "to_node_id", "volume", "ref_volume",
+                "base_volume", "obs_volume", "capacity", "D", "doc", "fftt", "travel_time",
+                "VDF_alpha", "VDF_beta", "VDF_plf", "speed", "VMT", "VHT", "PMT", "PHT",
+                "VHT_QVDF", "PHT_QVDF", "geometry"
+            ]
+            # Add mode-specific headers
+            #headers.extend([f"mod_vol_{mode.mode_type}" for mode in mode_type_vector])
+            headers.extend([
+                "P", "t0", "t2", "t3", "vt2", "mu", "Q_gamma", "free_speed", "cutoff_speed",
+                "congestion_ref_speed", "avg_queue_speed", "avg_QVDF_period_speed",
+                "avg_QVDF_period_travel_time", "Severe_Congestion_P"
+            ])
+            # Add speed intervals
+            headers.extend(
+                [f"spd_{t // 60:02}:{t % 60:02}" for t in range(demand_period_starting_hours * 60, demand_period_ending_hours * 60, 5)]
+            )
+            writer.writerow(headers)
+
+        # Append data
+        with open(link_performance_filename, mode='a', newline='') as link_file:
+            writer = csv.writer(link_file)
+
+            for k, link in enumerate(g_link_vector, start=1):
+                # Placeholder values (replace with actual calculations)
+                if link is None:
+                    print(f"Error: Link at index {k} is None.")
+                    continue
+            
+                if not hasattr(link, 'mode_MainVolume'):
+                    print(f"Error: Link at index {k} is missing 'mode_MainVolume'.")
+                    continue
+                P = t0 = t2 = t3 = vt2 = mu = Severe_Congestion_P = 0
+                Q_gamma = congestion_ref_speed = avg_queue_speed = avg_QVDF_period_speed = 0
+                IncomingDemand = DOC = 0
+
+                # Call your Link_QueueVDF function here
+                model_speed = [0] * 300  # Placeholder for model speed array
+
+                # Calculate VMT, VHT, PMT, PHT, VHT_QVDF, PHT_QVDF
+                VMT = VHT = PMT = PHT = VHT_QVDF = PHT_QVDF = 0
+                m  = 1 # for m, mode in enumerate(mode_type_vector, start=1):
+                VMT += link.mode_MainVolume[m] * link.length
+                VHT += link.mode_MainVolume[m] * link.Travel_time / 60.0
+                PMT += link.mode_MainVolume[m] * mode.occ * link.length
+                PHT += link.mode_MainVolume[m] * mode.occ * link.Travel_time / 60.0
+                VHT_QVDF += link.mode_MainVolume[m] * link.QVDF_TT / 60.0
+                PHT_QVDF += link.mode_MainVolume[m] * mode.occ * link.QVDF_TT / 60.0
+
+                # Create a row of data
+                row = [
+                    iteration_no, link.link_id, link.external_from_node_id, link.external_to_node_id,
+                    link.mode_MainVolume[m], link.Ref_volume, link.Base_volume, link.Obs_volume, link.Link_Capacity,
+                    IncomingDemand, DOC, link.FreeTravelTime, link.travel_time, link.VDF_Alpha, link.VDF_Beta,
+                    link.VDF_plf, link.length / max(link.Travel_time / 60.0, 0.001),
+                    link.travel_time - link.FreeTravelTime, VMT, VHT, PMT, PHT, VHT_QVDF, PHT_QVDF,
+                    link.geometry
+                ]
+
+                # Add mode-specific data
+                row.extend([link.mode_MainVolume[m] for m in range(1, len(mode_type_vector) + 1)])
+
+                # Add additional parameters
+                row.extend([
+                    P, t0, t2, t3, vt2, mu, Q_gamma, link.free_speed, link.Cutoff_Speed,
+                    congestion_ref_speed, avg_queue_speed, avg_QVDF_period_speed, link.QVDF_TT, Severe_Congestion_P
+                ])
+
+                # Add speed data
+                row.extend([model_speed[t // 5] for t in range(demand_period_starting_hours * 60, demand_period_ending_hours * 60, 5)])
+
+                # Write the row to the file
+                writer.writerow(row)
+    except Exception as e:
+        print(f"Error: {e}")
 
 
 def output_route_details(filename='route_assignment.csv'):
@@ -1021,7 +1133,119 @@ def output_route_details(filename='route_assignment.csv'):
 
     print(f"Output written to {filename}")
 
+def volume_difference(volume1, volume2, difference):
+    global number_of_links, number_of_modes, g_link_vector
+    for k in range(1, number_of_links + 1):
+        difference[k] = volume1[k] - volume2[k]
+        print(f"Link {k}: Volume1 = {volume1[k]}, Volume2 = {volume2[k]}, Difference = {difference[k]}")
+        for m in range(1, number_of_modes + 1):
+            g_link_vector[k].mode_MainVolume[m] = g_link_vector[k].mode_SubVolume[m] -  g_link_vector[k].mode_MainVolume[m] 
+            
+def update_volume(main_volume, sd_volume, lambda_):
+    global number_of_links, number_of_modes, g_link_vector
+    """
+    Update the main volume using the search direction and step size lambda.
+
+    Parameters:
+        main_volume: Current flow volumes on each link (list or numpy array).
+        sd_volume: Search direction volumes (difference between AON assignment and current flows).
+        lambda_: Step size for updating volumes.
+        link_data: A dictionary or data structure holding link information, including mode_MainVolume and mode_SDVolume.
+        number_of_links: Total number of links.
+        number_of_modes: Total number of modes.
+    """
+    # Update MainVolume using Lambda * SDVolume
+    for k in range(1, number_of_links + 1):
+        main_volume[k] += lambda_ * sd_volume[k]
+        print(f"SDVolume = {sd_volume[k]}, Lambda = {lambda_}, Updated MainVolume = {main_volume[k]}")
+
+    # Update mode_MainVolume using Lambda * mode_SDVolume for each link and mode
+    for k in range(1, number_of_links + 1):
+        for m in range(1, number_of_modes + 1):
+            g_link_vector[k].mode_MainVolume[m] += lambda_ * g_link_vector[k].mode_SDVolume [m]
+        
+
+def of_links_directional_derivative(main_volume, sd_volume, Lambda):
+    global number_of_links
+    OFscale = 1 
+    volume = np.zeros(number_of_links + 1)
+    link_cost_sum = 0
+
+    for k in range(1, number_of_links + 1):
+        volume[k] = main_volume[k] + Lambda * sd_volume[k]
+
+    for k in range(1, number_of_links + 1):
+        link_cost_sum += link_gen_cost(k, volume) * sd_volume[k]
+
+    return link_cost_sum / OFscale
+
+def links_sd_line_search(main_volume, sd_volume):
+    min_iterations  = 5 
+    max_iterations = 5 
     
+    """
+    Perform a line search using the bisection method to find the optimal step size lambda.
+    
+    Parameters:
+        main_volume: Current flow volumes on each link (list or numpy array).
+        sd_volume: Search direction volumes (difference between AON assignment and current flows).
+        of_links_directional_derivative: Function to compute the directional derivative.
+        min_iterations: Minimum iterations for the bisection method.
+        max_iterations: Maximum iterations for additional convergence steps.
+    
+    Returns:
+        Optimal step size (lambda).
+    """
+    lambdaleft = 0
+    lambdaright = 1
+    lambda_ = 0.5
+
+    # Initial check at lambda = 0
+    grad = of_links_directional_derivative(main_volume, sd_volume, 0.0)
+
+    if grad >= 0:
+        global LastLambda
+        LastLambda = 0.0
+        return 0.0
+
+    # Check at lambda = 1
+    grad = of_links_directional_derivative(main_volume, sd_volume, 1.0)
+    if grad <= 0:
+        LastLambda = 1.0
+        return 1.0
+
+    # Bisection method for line search within [0, 1]
+    for n in range(1, min_iterations + 1):
+        grad = of_links_directional_derivative(main_volume, sd_volume, lambda_)
+
+        if grad <= 0.0:
+            lambdaleft = lambda_
+        else:
+            lambdaright = lambda_
+
+        lambda_ = 0.5 * (lambdaleft + lambdaright)
+
+    # Additional iterations to ensure convergence, if necessary max_iterations is MAX_NO_BISECTITERATION
+    while lambdaleft == 0 and n <= max_iterations:
+        grad = of_links_directional_derivative(main_volume, sd_volume, lambda_)
+
+        if grad <= 0.0:
+            lambdaleft = lambda_
+        else:
+            lambdaright = lambda_
+
+        lambda_ = 0.5 * (lambdaleft + lambdaright)
+        n += 1
+
+    global ActualIterations
+    ActualIterations = n - 1
+    LastLambda = lambdaleft
+    return lambdaleft
+ 
+
+
+
+
 # main program below   
 
 
@@ -1089,7 +1313,8 @@ MDMinPathPredLink = alloc_3d_int((number_of_modes + 1, number_of_links + 1, numb
 iteration_no = 0
 # Initialize arrays
 MainVolume = np.zeros(number_of_links + 1)
-SDVolume = SubVolume = np.zeros(number_of_links + 1)
+SDVolume = np.zeros(number_of_links + 1)
+SubVolume = np.zeros(number_of_links + 1)
 MDMinPathPredLink = np.zeros((number_of_modes + 1, number_of_zones + 1, number_of_nodes + 1), dtype=int)
 
 # Record the start time
@@ -1135,9 +1360,31 @@ system_wide_travel_time = update_link_cost(MainVolume)
 
 
 system_least_travel_time = find_min_cost_routes(MDMinPathPredLink)
-all_or_nothing_assign(0)
-output_route_details('route_assignment.csv')
+all_or_nothing_assign(0, MainVolume)
 
+system_wide_travel_time = update_link_cost(MainVolume)
+assign_iterations = 2 
+
+for iteration_no in range(1, assign_iterations):
+    system_least_travel_time = find_min_cost_routes(MDMinPathPredLink)
+    
+       
+    all_or_nothing_assign(iteration_no, SubVolume)  # assign to the subvolume 
+
+    volume_difference(SubVolume, MainVolume, SDVolume)
+
+    lambda_ = links_sd_line_search(MainVolume, SDVolume)
+
+    update_volume(MainVolume, SDVolume, lambda_)
+
+    system_wide_travel_time = update_link_cost(MainVolume)
+
+    gap = (system_wide_travel_time - system_least_travel_time) / max(0.1, system_least_travel_time) * 100
+
+#        print(f"Iter No = {iteration_no}, Lambda = {lambda_:.6f}, System VMT = {system_wide_travel_time:.1f}, Least TT = {system_least_travel_time:.1f}, Gap = {gap:.2f}%")
+        
+output_route_details('route_assignment.csv')
+write_link_performance()
 # Output
 print(f"System Least Travel Time: {system_least_travel_time:.2f}")
  
