@@ -7,7 +7,9 @@ Created on Tue Nov 19 16:43:15 2024
 
 import csv
 import os
-
+import math
+import pandas as pd
+import osm2gmns as og
 
 from collections import defaultdict
 
@@ -38,6 +40,8 @@ g_ODME_VMT_penalty = 0.01
 
 # Global dictionaries
 g_map_external_node_id_2_node_seq_no = {}  # Maps external node ID to node sequence number
+g_map_external_node_id_2_zone_id = {}  # Maps external node ID to zone_id
+
 g_map_node_seq_no_2_external_node_id = {}  # Maps node sequence number to external node ID
 
 g_link_vector = []  # A list to hold LinkRecord objects
@@ -59,8 +63,271 @@ g_zone_outbound_link_size = None  # Placeholder for a 1D integer array
 md_od_flow = None         # Placeholder for a 3D array
 md_route_cost = None      # Placeholder for a 3D array
 
+def osm2gmns_network():
+    
+    input_file = 'map.osm'
+    net = og.getNetFromFile(input_file, link_types=('motorway','trunk','primary','secondary')) 
+    
+    og.consolidateComplexIntersections(net, auto_identify=True)
+    og.fillLinkAttributesWithDefaultValues(net, default_lanes=True, default_speed=True, default_capacity=True)
+    og.generateNodeActivityInfo(net)
+    og.outputNetToCSV(net)
 
-   
+# Function to calculate Euclidean distance between two nodes
+def calculate_distance(node1, node2):
+    return math.sqrt((node1["x_coord"] - node2["x_coord"])**2 + (node1["y_coord"] - node2["y_coord"])**2)
+
+# Read and process the `node.csv` file
+def trip_generation():
+    file_path  = 'node.csv'
+    node_list = []  # List to store all nodes
+    activity_nodes = []  # List to store nodes with a positive zone_id
+    production_totals = {}  # Dictionary to store production totals per node
+    number_of_zones = 0  # Track the maximum zone_id
+
+    # Step 1: Read the node file
+    with open(file_path, 'r') as csv_file:
+        csv_reader = csv.DictReader(csv_file)
+        
+        for row in csv_reader:
+            # Extract node_id, zone_id, and coordinates
+            node_id = int(row.get("node_id", 0))
+            zone_id_value = row.get("zone_id", "")
+            zone_id = int(zone_id_value) if zone_id_value.isdigit() else 0
+
+            # Read x_coord and y_coord
+            x_coord = float(row.get("x_coord", 0))
+            y_coord = float(row.get("y_coord", 0))
+
+            # Add node to node list
+            node = {
+                "node_id": node_id,
+                "zone_id": zone_id,
+                "x_coord": x_coord,
+                "y_coord": y_coord,
+                "production": 1,  # Optional initial production
+                "attraction": 1  # Optional initial attraction
+            }
+            node_list.append(node)
+            
+            # Add to activity nodes if zone_id > 0
+            if zone_id > 0:
+                activity_nodes.append(node)
+                # Update the maximum zone_id
+                if zone_id > number_of_zones:
+                    number_of_zones = zone_id
+
+            # Initialize production totals for each node as 1 (including itself)
+            production_totals[node_id] = 0
+
+    # Step 2: Map nodes to the nearest activity node
+    for node in node_list:
+        if node["zone_id"] > 0:
+            continue  # Skip activity nodes
+        
+        min_distance = float("inf")
+        nearest_activity_node = None
+
+        for activity_node in activity_nodes:
+            distance = calculate_distance(node, activity_node)
+            if distance < min_distance:
+                min_distance = distance
+                nearest_activity_node = activity_node
+        
+        # Update the production total of the nearest activity node
+        if nearest_activity_node:
+            production_totals[nearest_activity_node["node_id"]] += 1
+
+    # Step 3: Update the production column for activity nodes
+    updated_nodes = []
+    for node in node_list:
+        if node["node_id"] in production_totals:
+            node["production"] = production_totals[node["node_id"]]
+        updated_nodes.append(node)
+
+    # Step 4: Rewrite the `node.csv` file with updated columns
+    with open(file_path, 'w', newline='') as csv_file:
+        fieldnames = ["node_id", "zone_id", "x_coord", "y_coord", "production", "attraction"]
+        csv_writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+
+        csv_writer.writeheader()
+        for node in updated_nodes:
+            csv_writer.writerow({
+                "node_id": node["node_id"],
+                "zone_id": node["zone_id"],
+                "x_coord": node["x_coord"],
+                "y_coord": node["y_coord"],
+                "production": node["production"]*100,
+                "attraction": node["production"]*100  # for simplicity
+            })
+
+def perform_simple_logit_model_for_trip_distribution(beta=0.1):
+    """
+    Reads `node.csv` and `accessibility_matrix.csv`, performs a simple logit-based destination choice model,
+    and writes the output to `demand.csv`.
+
+    :param beta: Coefficient for the utility function using accessibility
+    """
+    import pandas as pd
+    import math
+
+    node_file = 'node.csv'
+    accessibility_matrix_file = 'accessibility_matrix.csv'
+    output_demand_file = 'demand.csv'
+
+    # Step 1: Read node.csv
+    node_df = pd.read_csv(node_file)
+
+    # Filter for zones with zone_id > 0 (activity zones)
+    zones_df = node_df[node_df['zone_id'] > 0]
+
+    # Create dictionaries for production and attraction values by o_zone_id and d_zone_id
+    production = zones_df.set_index('zone_id')['production'].to_dict()
+    attraction = zones_df.set_index('zone_id')['attraction'].to_dict()
+
+    # Step 2: Read accessibility_matrix.csv
+    accessibility_df = pd.read_csv(accessibility_matrix_file)
+
+    # Create an empty list to store demand data
+    demand_data = []
+
+    # Step 3: Perform destination choice model
+    for o_zone_id in production:
+        # Filter rows in the accessibility matrix for the current origin zone
+        o_accessibility = accessibility_df[accessibility_df['o_zone_id'] == o_zone_id]
+
+        # Calculate total utility for normalization
+        total_utility = 0
+        utility_dict = {}
+        for _, row in o_accessibility.iterrows():
+            d_zone_id = row['d_zone_id']
+            accessibility = row['cost']
+
+            # Skip if destination is not in the attraction dictionary
+            if d_zone_id not in attraction:
+                continue
+
+            # Compute utility
+            utility = math.exp(-beta * accessibility)
+            utility_dict[d_zone_id] = utility
+            total_utility += utility
+
+        # Compute demand for each destination zone
+        for d_zone_id, utility in utility_dict.items():
+            if total_utility > 0:  # Avoid division by zero
+                prob = utility / total_utility  # Logit model
+                Tij = production[o_zone_id] * prob
+
+                # Append to demand data
+                demand_data.append({
+                    'o_zone_id': o_zone_id,
+                    'd_zone_id': d_zone_id,
+                    'volume': Tij
+                })
+
+    # Step 4: Write demand.csv
+    demand_df = pd.DataFrame(demand_data)
+    # Ensure o_zone_id and d_zone_id columns are integers
+    demand_df['o_zone_id'] = demand_df['o_zone_id'].astype(int)
+    demand_df['d_zone_id'] = demand_df['d_zone_id'].astype(int)
+    
+    demand_df.to_csv(output_demand_file, index=False)
+
+    print(f"Demand matrix has been successfully written to {output_demand_file}.")
+      
+ 
+
+def perform_gravity_model(beta=0.1, model_type="singly"):
+    node_file = 'node.csv'
+    accessibility_matrix_file =  "accessibility_matrix.csv"
+    output_demand_file = 'demand.csv'
+    """
+    Reads `node.csv` and `accessibility_matrix.csv`, performs a gravity model,
+    and writes the output to `demand.csv`.
+
+    :param node_file: Path to the node.csv file
+    :param accessibility_matrix_file: Path to the accessibility_matrix.csv file
+    :param output_demand_file: Path to the output demand.csv file
+    :param beta: Friction factor for the gravity model
+    :param model_type: Type of gravity model: "singly" or "doubly"
+    """
+    # Step 1: Read node.csv
+    node_df = pd.read_csv(node_file)
+
+    # Filter for zones with zone_id > 0 (activity zones)
+    zones_df = node_df[node_df['zone_id'] > 0]
+
+    # Create dictionaries for production and attraction values by zone_id
+    production = zones_df.set_index('zone_id')['production'].to_dict()
+    attraction = zones_df.set_index('zone_id')['attraction'].to_dict()
+
+    # Step 2: Read accessibility_matrix.csv
+    accessibility_df = pd.read_csv(accessibility_matrix_file)
+
+    # Create empty list for storing demand data
+    demand_data = []
+
+    # Step 3: Prepare the model based on the type
+    if model_type == "doubly":
+        # Compute balancing factors for doubly constrained model
+        B = {zone: 1.0 for zone in production.keys()}  # Initialize balancing factor B
+        tolerance = 1e-6  # Tolerance for convergence
+        max_iterations = 1000  # Maximum iterations
+        iterations = 0
+        converged = False
+
+        # Iteratively compute balancing factors
+        while not converged and iterations < max_iterations:
+            converged = True
+            A = {zone: 1.0 / sum(attraction[dest] * math.exp(-beta * accessibility_df[
+                (accessibility_df["o_zone_id"] == zone) & (accessibility_df["d_zone_id"] == dest)
+            ]["cost"].values[0]) * B[dest] for dest in attraction.keys() if dest != zone) for zone in production.keys()}
+
+            for zone in production.keys():
+                new_B = 1.0 / sum(production[orig] * A[orig] * math.exp(-beta * accessibility_df[
+                    (accessibility_df["d_zone_id"] == orig) & (accessibility_df["d_zone_id"] == zone)
+                ]["cost"].values[0]) for orig in production.keys() if orig != zone)
+                if abs(new_B - B[zone]) > tolerance:
+                    converged = False
+                B[zone] = new_B
+
+            iterations += 1
+
+        if iterations == max_iterations:
+            print("Warning: Balancing factors did not converge.")
+
+    # Step 4: Calculate trip volumes using the chosen gravity model
+    for _, row in accessibility_df.iterrows():
+        from_zone = row['o_zone_id']
+        to_zone = row['d_zone_id']
+        cost = row['cost']
+
+        # Skip if either zone has zero production/attraction
+        if from_zone not in production or to_zone not in attraction:
+            continue
+
+        # Gravity model formula
+        if model_type == "singly":
+            Tij = production[from_zone] * attraction[to_zone] * math.exp(-beta * cost)
+        elif model_type == "doubly":
+            Tij = production[from_zone] * A[from_zone] * attraction[to_zone] * math.exp(-beta * cost) * B[to_zone]
+        else:
+            raise ValueError("Invalid model_type. Choose 'singly' or 'doubly'.")
+
+        # Append to demand data
+        demand_data.append({
+            'o_zone_id': from_zone,
+            'd_zone_id': to_zone,
+            'volume': Tij
+        })
+
+    # Step 5: Write demand.csv
+    demand_df = pd.DataFrame(demand_data)
+    demand_df.to_csv(output_demand_file, index=False)
+
+    print(f"Demand matrix has been successfully written to {output_demand_file}.")
+
+           
 class ModeType:
     """Represents a mode type with its associated attributes."""
     def __init__(self, mode_type, vot, pce, occ, dedicated_shortest_path, demand_file):
@@ -113,7 +380,7 @@ class LinkRecord:
         self.mode_Toll = [0.0] * MAX_MODE_TYPES
         self.mode_AdditionalCost = [0.0] * MAX_MODE_TYPES
 
-        self.Travel_time = 0.0
+        self.travel_time = 0.0
         self.BPR_TT = 0.0
         self.QVDF_TT = 0.0
 
@@ -133,7 +400,7 @@ class LinkRecord:
         self.Q_n = 1.0
         self.Q_cp = 0.28125
         self.Q_s = 4.0
-        self.Travel_time = 0.0
+        self.travel_time = 0.0
         self.BPR_TT = 0.0
         self.QVDF_TT = 0.0
         self.Ref_volume = 0.0
@@ -287,6 +554,9 @@ def process_node_file(file_name, log_file=None):
             g_map_node_seq_no_2_external_node_id[number_of_nodes + 1] = node_id
             g_map_external_node_id_2_node_seq_no[node_id] = number_of_nodes + 1  # Sequential number starts from 1
 
+
+            g_map_external_node_id_2_zone_id[node_id] = zone_id
+
             # Update number_of_zones
             if zone_id >= 1 and zone_id > number_of_zones:
                 number_of_zones = zone_id
@@ -312,6 +582,7 @@ def process_node_file(file_name, log_file=None):
 
 
 
+{}
 
 def get_number_of_links_from_link_file(file_name):
     """
@@ -338,8 +609,8 @@ def get_number_of_links_from_link_file(file_name):
     return number_of_links
 
 
-def read_links(file_name, number_of_modes):
-    global number_of_links, g_map_external_node_id_2_node_seq_no, g_link_vector
+def read_links(file_name, use_us_standard):
+    global number_of_links, number_of_modes, g_map_external_node_id_2_node_seq_no, g_link_vector
     g_tap_log_file=0
     logfile_path=None
     #g_link_vector = defaultdict(LinkRecord)  # Dictionary to store links with their index as keys
@@ -370,11 +641,12 @@ def read_links(file_name, number_of_modes):
                 print(f"Error in to_node_id = {link.external_to_node_id} for link_id = {link.link_id}")
                 continue
 
-            # Read additional properties
-            link.length = float(row.get("length", 0.0))
+            #  Set use_us_standard to True for US Standard (miles, mph), False for International (meters, kmph)
+
+
             
             link.Ref_volume = float(row.get("ref_volume", 0.0))
-
+            link.length = float(row.get("length", 0.0))
 
             if "lanes" in row:
                 link.lanes = int(row["lanes"])
@@ -383,6 +655,18 @@ def read_links(file_name, number_of_modes):
                 link.Link_Capacity = link.lanes * link.Lane_Capacity
 
             link.free_speed = float(row.get("free_speed", 10.0))
+            
+            # Read additional properties
+            # Determine the unit for length based on the standard
+            if use_us_standard:
+                # Assume length is in miles, speed in mph 
+                pass  # No conversion needed
+            else:
+                # Length is in meters (International Standard), speed in kmph
+                link.length /= 1609.34    # convert to mile
+                link.free_speed  /=1.609  # convert to mile per hour
+
+            
             link.FreeTravelTime = link.length / link.free_speed * 60.0
 
             debug = 1 
@@ -440,7 +724,7 @@ def find_links_to():
 
     return links_to
 
-def init_link_pointers(links_file_name,  g_tap_log_file=0, logfile_path=None):
+def init_link_pointers(links_file_name,  g_tap_log_file=0, logfile_path=None, use_us_standard = False):
     """
     Initializes pointers to the first and last link originating from each node.
 
@@ -503,7 +787,7 @@ def init_link_pointers(links_file_name,  g_tap_log_file=0, logfile_path=None):
 
 
 
-def init_links(links_file_name="link.csv", g_tap_log_file=0, logfile_path=None):
+def init_links(links_file_name="link.csv", g_tap_log_file=0, logfile_path=None, use_us_standard= False):
     """
     Initializes link data by reading the links file, setting up the 'LinksTo' structure, and initializing link pointers.
 
@@ -514,12 +798,12 @@ def init_links(links_file_name="link.csv", g_tap_log_file=0, logfile_path=None):
     :param logfile_path: Path to the log file (if logging is enabled).
     :return: Tuple containing links, LinksTo, FirstLinkFrom, and LastLinkFrom.
     """
-    global g_link_vector, links_to, FirstLinkFrom, LastLinkFrom, number_of_links, number_of_nodes, g_map_node_seq_no_2_external_node_id
+    global g_link_vector, links_to, FirstLinkFrom, LastLinkFrom, number_of_links, number_of_modes, number_of_nodes, g_map_node_seq_no_2_external_node_id
     # Initialize the links structure
     g_link_vector = [None] * (number_of_links + 1)  # +1 for 1-based indexing
 
     # Step 1: Read links from file
-    read_links(links_file_name, number_of_modes=10)
+    read_links(links_file_name, use_us_standard)
 
     print(f" after reading link.csv, Length of Link: {len(g_link_vector)}")
 
@@ -528,7 +812,7 @@ def init_links(links_file_name="link.csv", g_tap_log_file=0, logfile_path=None):
     links_to = find_links_to()
 
     # Step 3: Initialize link pointers
-    init_link_pointers(links_file_name, g_tap_log_file, logfile_path)
+    init_link_pointers(links_file_name, g_tap_log_file, logfile_path,use_us_standard)
 
     return
 
@@ -641,7 +925,7 @@ def minpath(mode, orig, pred_link, cost_to):
     """
     Computes the shortest path from an origin node using a modified label-setting algorithm.
     """
-    global FirstLinkFrom, LastLinkFrom, g_map_external_node_id_2_node_seq_no, g_map_external_node_id_2_node_seq_no, number_of_zones, number_of_nodes, first_thru_node
+    global FirstLinkFrom, LastLinkFrom, g_map_external_node_id_2_node_seq_no, number_of_zones, number_of_nodes, first_thru_node
     cost_to.fill(BIGM)
     pred_link.fill(INVALID)
     
@@ -676,7 +960,7 @@ def minpath(mode, orig, pred_link, cost_to):
             #        continue
 
                 new_node = g_link_vector[k].internal_to_node_id
-                new_cost = cost_to[now] + g_link_vector[k].Travel_time
+                new_cost = cost_to[now] + g_link_vector[k].travel_time
 
                 if debug:
                     print(f"Checking link {k}: new_node={new_node}, g_link_vector[k].length  = {g_link_vector[k].length}, new_cost={new_cost:.4f}, "
@@ -716,14 +1000,21 @@ def find_min_cost_routes(min_path_pred_link):
     """
     Finds the minimum cost routes for all origins and modes.
     """
-    global g_map_external_node_id_2_node_seq_no, total_o_flow, md_route_cost, md_od_flow, g_zone_outbound_link_size, number_of_zones, number_of_nodes
+    global g_map_external_node_id_2_node_seq_no, g_map_external_node_id_2_zone_id, total_o_flow, md_route_cost, md_od_flow, g_zone_outbound_link_size, number_of_zones, number_of_nodes
     cost_to = np.full((number_of_zones + 1, number_of_nodes + 1), BIGM, dtype=float)
 
     system_least_travel_time  = 0 
     m = 1 
-    debug = 1
-    for orig in range(1, number_of_zones):
-        if total_o_flow[orig] < 1e-5:
+    
+    
+    debug = 0
+    
+    for orig in range(1, number_of_zones+1):
+
+        if orig not in g_map_external_node_id_2_zone_id:
+            continue
+        
+        if g_map_external_node_id_2_zone_id[orig] <1:
             continue
     
 
@@ -732,22 +1023,25 @@ def find_min_cost_routes(min_path_pred_link):
 
         if md_route_cost is not None:
             for dest in range(1, number_of_zones + 1):
-                md_route_cost[m][orig][dest] = BIGM
+               if dest not in g_map_external_node_id_2_zone_id:
+                    continue
+        
+               md_route_cost[m][orig][dest] = BIGM
 
-                if md_od_flow[m][orig][dest] > 1e-6:
-                    internal_node_id_for_destination_zone = g_map_external_node_id_2_node_seq_no[dest]
-                    if cost_to[orig][internal_node_id_for_destination_zone] <= BIGM - 1:
-                        md_route_cost[m][orig][dest] = cost_to[orig][internal_node_id_for_destination_zone]
-                        system_least_travel_time+= (
-                            md_route_cost[m][orig][dest] * md_od_flow[m][orig][dest] 
+               internal_node_id_for_destination_zone = g_map_external_node_id_2_node_seq_no[dest]
+               if cost_to[orig][internal_node_id_for_destination_zone] <= BIGM - 1:
+                    md_route_cost[m][orig][dest] = cost_to[orig][internal_node_id_for_destination_zone]
+                    if md_od_flow[m][orig][dest] > 1e-6:
+                        system_least_travel_time += (
+                            md_route_cost[m][orig][dest] * md_od_flow[m][orig][dest]
                         )
 
                     if debug:
-                       print(f"Processing mode {m}, origin {orig}") 
-                       print(f"    Destination {dest}:")
-                       print(f"      Cost to Destination: {cost_to[orig][internal_node_id_for_destination_zone]:.4f}")
-                       print(f"      Updated md_route_cost[{m}][{orig}][{dest}] = {md_route_cost[m][orig][dest]:.4f}")
-                       print(f"      Updated System Least Travel Time: {system_least_travel_time:.4f}")
+                        print(f"Processing mode {m}, origin {orig}")
+                        print(f"    Destination {dest}:")
+                        print(f"      Cost to Destination: {cost_to[orig][internal_node_id_for_destination_zone]:.4f}")
+                        print(f"      Updated md_route_cost[{m}][{orig}][{dest}] = {md_route_cost[m][orig][dest]:.4f}")
+                        print(f"      Updated System Least Travel Time: {system_least_travel_time:.4f}")
    
     return system_least_travel_time
  
@@ -770,21 +1064,21 @@ def link_travel_time(k, volume):
     )
     print(f"Link {k}: Incoming Demand = {incoming_demand}")
 
-    g_link_vector[k].Travel_time = (
+    g_link_vector[k].travel_time = (
         g_link_vector[k].FreeTravelTime 
         * (1.0 + g_link_vector[k].VDF_Alpha * (incoming_demand / max(0.1, g_link_vector[k].Link_Capacity)) ** g_link_vector[k].VDF_Beta)
     )
 
-    print(f"Link {k}: Calculated Travel Time = {g_link_vector[k].Travel_time}")
+    print(f"Link {k}: Calculated Travel Time = {g_link_vector[k].travel_time}")
     
-    if g_link_vector[k].Travel_time < 0:
-        g_link_vector[k].Travel_time = 0
+    if g_link_vector[k].travel_time < 0:
+        g_link_vector[k].travel_time = 0
         print(f"Link {k}: Travel Time adjusted to 0 (was negative)")
 
-    g_link_vector[k].BPR_TT = g_link_vector[k].Travel_time
+    g_link_vector[k].BPR_TT = g_link_vector[k].travel_time
     print(f"Link {k}: BPR_TT = {g_link_vector[k].BPR_TT}")
 
-    return g_link_vector[k].Travel_time
+    return g_link_vector[k].travel_time
 
 def link_travel_time_integral(k, volume):
     global g_link_vector,demand_period_starting_hours, demand_period_ending_hours
@@ -856,21 +1150,64 @@ def update_link_cost(main_volume):
 
 
         #print(f"Link {k}: calling link_travel_time")
-        g_link_vector[k].Travel_time = link_travel_time(k, main_volume)
-        #print(f"Link {k}: Travel Time = {g_link_vector[k].Travel_time}")
+        g_link_vector[k].travel_time = link_travel_time(k, main_volume)
+        #print(f"Link {k}: Travel Time = {g_link_vector[k].travel_time}")
 
         g_link_vector[k].GenCost = link_gen_cost(k, main_volume)
         #print(f"Link {k}: Generalized Cost = {g_link_vector[k].GenCost}")
 
-        contribution_to_travel_time = main_volume[k] * g_link_vector[k].Travel_time
+        contribution_to_travel_time = main_volume[k] * g_link_vector[k].travel_time
         system_wide_travel_time += contribution_to_travel_time
         #print(f"Link {k}: Contribution to System-Wide Travel Time = {contribution_to_travel_time}")
 
     print(f"Total System-Wide Travel Time = {system_wide_travel_time}")
     return system_wide_travel_time
 
-def all_or_nothing_assign(assignment_iteration_no, main_volume):
-    global g_link_vector, total_o_flow, number_of_zones,  number_of_modes, MDMinPathPredLink, g_zone_outbound_link_size, md_od_flow, md_route_cost, g_map_external_node_id_2_node_seq_no  
+def output_assessibility_matrix():
+    global number_of_zones, number_of_modes,  g_zone_outbound_link_size, g_map_external_node_id_2_node_seq_no, md_route_cost
+
+    # Output file name
+    output_file = "accessibility_matrix.csv"
+
+    # Open the CSV file for writing
+    with open(output_file, 'w', newline='') as csv_file:
+        csv_writer = csv.writer(csv_file)
+
+        # Write the header row
+        csv_writer.writerow(["o_zone_id", "d_zone_id", "mode_id", "cost"])
+
+        # Loop through all origin zones
+        for Orig in range(1, number_of_zones + 1):
+            
+            if Orig not in g_map_external_node_id_2_zone_id:
+                continue
+
+           
+            # Skip zones with no outbound links
+            if g_zone_outbound_link_size[Orig] == 0:
+                continue
+
+            # Iterate over all destinations
+            for Dest in range(1, number_of_zones + 1):
+               
+                if Dest not in g_map_external_node_id_2_zone_id:
+                   continue
+                
+                if Dest == Orig:
+                    continue  # Skip self-loops
+
+                for m in range(1, number_of_modes + 1):  # Iterate over modes
+                    # Skip if cost is not feasible (BIGM represents an infeasible cost)
+                    if md_route_cost[m][Orig][Dest] >= BIGM - 1:
+                         continue
+
+                    # Write the valid record to the CSV
+                    csv_writer.writerow([Orig, Dest, m, md_route_cost[m][Orig][Dest]])
+
+    print(f"Accessibility matrix has been successfully written to {output_file}.")
+
+def all_or_nothing_assign(assignment_iteration_no, main_volume, MDMinPathPredLink):
+    global g_link_vector, total_o_flow, number_of_zones,  number_of_modes, g_zone_outbound_link_size, md_od_flow, md_route_cost, g_map_external_node_id_2_node_seq_no  
     print(f"All or nothing assignment, assignment_iteration_no = {assignment_iteration_no}")
     
     # Initialize ProcessorVolume and ProcessorModeVolume
@@ -950,22 +1287,16 @@ def write_link_performance():
     """
     # Open files for writing and appending
     link_performance_filename = "link_performance.csv"
-    log_filename = "TAP_log.csv"
 
-    print("g_link_vector initialization:")
-    for link in g_link_vector:
-        print(link)
+    #print("g_link_vector initialization:")
+    #for link in g_link_vector:
+    #    print(link)
     
-    mode_type_vector = [
-        {"mode_type": "auto", "occ": 1.5},  # Example: Mode type 'car' with occupancy 1.5
-    ]
-
     try:
         with open(link_performance_filename, mode='w', newline='') as link_file:
             # Write headers
             writer = csv.writer(link_file)
-            headers = [
-                "iteration_no", "link_id", "from_node_id", "to_node_id", "volume", "ref_volume",
+            headers = [ "link_id", "from_node_id", "to_node_id", "volume", "ref_volume",
                 "base_volume", "obs_volume", "capacity", "D", "doc", "fftt", "travel_time",
                 "VDF_alpha", "VDF_beta", "VDF_plf", "speed", "VMT", "VHT", "PMT", "PHT",
                 "VHT_QVDF", "PHT_QVDF", "geometry"
@@ -987,7 +1318,7 @@ def write_link_performance():
         with open(link_performance_filename, mode='a', newline='') as link_file:
             writer = csv.writer(link_file)
 
-            for k, link in enumerate(g_link_vector, start=1):
+            for k, link in enumerate(g_link_vector):
                 # Placeholder values (replace with actual calculations)
                 if link is None:
                     print(f"Error: Link at index {k} is None.")
@@ -1006,25 +1337,27 @@ def write_link_performance():
                 # Calculate VMT, VHT, PMT, PHT, VHT_QVDF, PHT_QVDF
                 VMT = VHT = PMT = PHT = VHT_QVDF = PHT_QVDF = 0
                 m  = 1 # for m, mode in enumerate(mode_type_vector, start=1):
+                occ  =1 
+                
                 VMT += link.mode_MainVolume[m] * link.length
-                VHT += link.mode_MainVolume[m] * link.Travel_time / 60.0
-                PMT += link.mode_MainVolume[m] * mode.occ * link.length
-                PHT += link.mode_MainVolume[m] * mode.occ * link.Travel_time / 60.0
+                VHT += link.mode_MainVolume[m] * link.travel_time / 60.0
+                PMT += link.mode_MainVolume[m] * occ * link.length
+                PHT += link.mode_MainVolume[m] * occ * link.travel_time / 60.0
                 VHT_QVDF += link.mode_MainVolume[m] * link.QVDF_TT / 60.0
-                PHT_QVDF += link.mode_MainVolume[m] * mode.occ * link.QVDF_TT / 60.0
+                PHT_QVDF += link.mode_MainVolume[m] * occ * link.QVDF_TT / 60.0
 
                 # Create a row of data
                 row = [
-                    iteration_no, link.link_id, link.external_from_node_id, link.external_to_node_id,
+                    link.link_id, link.external_from_node_id, link.external_to_node_id,
                     link.mode_MainVolume[m], link.Ref_volume, link.Base_volume, link.Obs_volume, link.Link_Capacity,
                     IncomingDemand, DOC, link.FreeTravelTime, link.travel_time, link.VDF_Alpha, link.VDF_Beta,
-                    link.VDF_plf, link.length / max(link.Travel_time / 60.0, 0.001),
+                    link.VDF_plf, link.length / max(link.travel_time / 60.0, 0.001),
                     link.travel_time - link.FreeTravelTime, VMT, VHT, PMT, PHT, VHT_QVDF, PHT_QVDF,
                     link.geometry
                 ]
 
-                # Add mode-specific data
-                row.extend([link.mode_MainVolume[m] for m in range(1, len(mode_type_vector) + 1)])
+                # Add mode-specific data m = 1
+                row.extend([link.mode_MainVolume[m]] )
 
                 # Add additional parameters
                 row.extend([
@@ -1058,8 +1391,8 @@ def output_route_details(filename='route_assignment.csv'):
 
         # Write the CSV header in lowercase
         writer.writerow([
-            "mode", "route_id", "o_zone_id", "d_zone_id", "unique_route_id", 
-            "node_ids", "link_ids", "total_distance", "total_free_flow_travel_time", 
+            "mode", "route_seq_id", "o_zone_id", "d_zone_id", "unique_route_id", 
+            "node_sequence", "link_ids", "total_distance", "total_free_flow_travel_time", 
             "total_travel_time", "route_key"
         ])
 
@@ -1102,7 +1435,7 @@ def output_route_details(filename='route_assignment.csv'):
                                 # Sum up total distance and travel times
                                 total_distance += g_link_vector[k].length
                                 total_free_flow_travel_time += g_link_vector[k].FreeTravelTime
-                                total_travel_time += g_link_vector[k].Travel_time
+                                total_travel_time += g_link_vector[k].travel_time
                                 # Add the to_node_id for the last link
                                 if i == 0:
                                     to_node_id = g_link_vector[k].external_to_node_id
@@ -1157,12 +1490,16 @@ def update_volume(main_volume, sd_volume, lambda_):
     # Update MainVolume using Lambda * SDVolume
     for k in range(1, number_of_links + 1):
         main_volume[k] += lambda_ * sd_volume[k]
+        m  =1 
+        g_link_vector[k].mode_MainVolume[m] = main_volume[k] 
         print(f"SDVolume = {sd_volume[k]}, Lambda = {lambda_}, Updated MainVolume = {main_volume[k]}")
 
-    # Update mode_MainVolume using Lambda * mode_SDVolume for each link and mode
-    for k in range(1, number_of_links + 1):
-        for m in range(1, number_of_modes + 1):
-            g_link_vector[k].mode_MainVolume[m] += lambda_ * g_link_vector[k].mode_SDVolume [m]
+# =============================================================================
+#     # Update mode_MainVolume using Lambda * mode_SDVolume for each link and mode
+#     for k in range(1, number_of_links + 1):
+#         for m in range(1, number_of_modes + 1):
+#             g_link_vector[k].mode_MainVolume[m] += lambda_ * g_link_vector[k].mode_SDVolume [m]
+# =============================================================================
         
 
 def of_links_directional_derivative(main_volume, sd_volume, Lambda):
@@ -1246,145 +1583,155 @@ def links_sd_line_search(main_volume, sd_volume):
 
 
 
-# main program below   
 
+def traffic_assignment(assign_iterations,use_us_standard):
 
-# Example Usage
-file_name = "node.csv"  # Replace with your CSV file path
-log_file = "logfile.txt"  # Optional log file path
-
-# Process the node file
-process_node_file(file_name, log_file=log_file)
-
-
-
-# Example Usage
-file_name = "link.csv"  # Replace with your CSV file path
-
-# Get the number of links
-number_of_links = get_number_of_links_from_link_file(file_name)
-
-# Output the result
-print(f"Number of Links: {number_of_links}")
-
-
-# Output results
-print(f"Number of Nodes: {number_of_nodes}")
-print(f"Number of Zones: {number_of_zones}")
-print(f"First Through Node: {first_thru_node}")
-#print(f"Node Sequence Map: {g_map_node_seq_no_2_external_node_id}")
-#print(f"External Node Map: {external_node_map}")
-
-
-# Open the summary log file for writing
-summary_log_file = open("summary_log_file.txt", "w")
-
-# Initialize variables
-MainVolume = None  # Placeholder for a double array
-SubVolume = None  # Placeholder for a double array
-SDVolume = None  # Placeholder for a double array
-Lambda = 0.0
-MDMinPathPredLink = None  # Placeholder for a 3D array
-
-init_links(
-    links_file_name="link.csv",
-    g_tap_log_file=1,
-    logfile_path="logfile.txt"
-)
-
-print(f" before link index, Length of Link: {len(g_link_vector)}")
+    # Example Usage
+    file_name = "node.csv"  # Replace with your CSV file path
+    log_file = "logfile.txt"  # Optional log file path
     
-initialize_g_link_indices()
-
-print(f" after link index, Length of Link: {len(g_link_vector)}")
+    # Process the node file
+    process_node_file(file_name, log_file=log_file)
     
-# Print results
-print("Links:", g_link_vector)
-print("LinksTo:", links_to)
-print("FirstLinkFrom:", FirstLinkFrom)
-print("LastLinkFrom:", LastLinkFrom)
-
-
-read_od_flow() 
-
-# Allocate MDMinPathPredLink
-MDMinPathPredLink = alloc_3d_int((number_of_modes + 1, number_of_links + 1, number_of_nodes + 1))
-
-iteration_no = 0
-# Initialize arrays
-MainVolume = np.zeros(number_of_links + 1)
-SDVolume = np.zeros(number_of_links + 1)
-SubVolume = np.zeros(number_of_links + 1)
-MDMinPathPredLink = np.zeros((number_of_modes + 1, number_of_zones + 1, number_of_nodes + 1), dtype=int)
-
-# Record the start time
-start = datetime.now()
-
-# Assign base volume to main volume
-for k in range(1, number_of_links + 1):
-    MainVolume[k] = 0
-
-# Set up the cost using FFTT
-system_wide_travel_time = update_link_cost(MainVolume)
-
-# # Define the file path
-# file_path = "link_performance.csv"
-
-# # Open the file in write mode
-# with open(file_path, 'w') as link_performance_file:
-#     # Write headers to the file
-#     link_performance_file.write(
-#         "iteration_no,link_id,from_node_id,to_node_id,volume,ref_volume,base_volume,obs_volume,"
-#         "capacity,D,doc,fftt,travel_time,VDF_alpha,VDF_beta,VDF_plf,speed,VMT,VHT,PMT,PHT,"
-#         "VHT_QVDF,PHT_QVDF,geometry\n"
-#     )
-
-
-
-# for m in range(1, number_of_modes + 1):
-#     link_performance_file.write(f"mod_vol_{g_mode_type_vector[m].mode_type},")
-# link_performance_file.write(
-#     "P,t0,t2,t3,vt2,mu,Q_gamma,free_speed,cutoff_speed,congestion_ref_speed,"
-#     "avg_queue_speed,avg_QVDF_period_speed,avg_QVDF_period_travel_time,"
-#     "Severe_Congestion_P,"
-#)
-
-# # Write time interval speeds
-# for t in range(demand_period_starting_hours * 60, demand_period_ending_hours * 60, 5):
-#     hour = t // 60
-#     minute = t % 60
-#     link_performance_file.write(f"spd_{hour:02d}:{minute:02d},")
-# link_performance_file.write("\n")
-# Calculate the system least travel time
-
-
-
-system_least_travel_time = find_min_cost_routes(MDMinPathPredLink)
-all_or_nothing_assign(0, MainVolume)
-
-system_wide_travel_time = update_link_cost(MainVolume)
-assign_iterations = 2 
-
-for iteration_no in range(1, assign_iterations):
-    system_least_travel_time = find_min_cost_routes(MDMinPathPredLink)
     
-       
-    all_or_nothing_assign(iteration_no, SubVolume)  # assign to the subvolume 
-
-    volume_difference(SubVolume, MainVolume, SDVolume)
-
-    lambda_ = links_sd_line_search(MainVolume, SDVolume)
-
-    update_volume(MainVolume, SDVolume, lambda_)
-
-    system_wide_travel_time = update_link_cost(MainVolume)
-
-    gap = (system_wide_travel_time - system_least_travel_time) / max(0.1, system_least_travel_time) * 100
-
-#        print(f"Iter No = {iteration_no}, Lambda = {lambda_:.6f}, System VMT = {system_wide_travel_time:.1f}, Least TT = {system_least_travel_time:.1f}, Gap = {gap:.2f}%")
+    
+    # Example Usage
+    file_name = "link.csv"  # Replace with your CSV file path
+    
+    # Get the number of links
+    number_of_links = get_number_of_links_from_link_file(file_name)
+    
+    # Output the result
+    print(f"Number of Links: {number_of_links}")
+    
+    
+    # Output results
+    print(f"Number of Nodes: {number_of_nodes}")
+    print(f"Number of Zones: {number_of_zones}")
+    print(f"First Through Node: {first_thru_node}")
+    #print(f"Node Sequence Map: {g_map_node_seq_no_2_external_node_id}")
+    #print(f"External Node Map: {external_node_map}")
+    
+    
+    # Open the summary log file for writing
+    summary_log_file = open("summary_log_file.txt", "w")
+    
+    # Initialize variables
+    MainVolume = None  # Placeholder for a double array
+    SubVolume = None  # Placeholder for a double array
+    SDVolume = None  # Placeholder for a double array
+    Lambda = 0.0
+    MDMinPathPredLink = None  # Placeholder for a 3D array
+    
+    init_links(
+        links_file_name="link.csv",
+        g_tap_log_file=1,
+        logfile_path="logfile.txt",
+        use_us_standard = use_us_standard
+    )
+    
+    print(f" before link index, Length of Link: {len(g_link_vector)}")
         
-output_route_details('route_assignment.csv')
-write_link_performance()
-# Output
-print(f"System Least Travel Time: {system_least_travel_time:.2f}")
+    initialize_g_link_indices()
+    
+    print(f" after link index, Length of Link: {len(g_link_vector)}")
+        
+    # Print results
+    print("Links:", g_link_vector)
+    print("LinksTo:", links_to)
+    print("FirstLinkFrom:", FirstLinkFrom)
+    print("LastLinkFrom:", LastLinkFrom)
+    
+    
+    read_od_flow() 
+    
+    # Allocate MDMinPathPredLink
+    
+    iteration_no = 0
+    # Initialize arrays
+    MainVolume = np.zeros(number_of_links + 1)
+    SDVolume = np.zeros(number_of_links + 1)
+    SubVolume = np.zeros(number_of_links + 1)
+    MDMinPathPredLink = np.zeros((number_of_modes + 1, number_of_zones + 1, number_of_nodes + 1), dtype=int)
+    
+    # Record the start time
+    start = datetime.now()
+    
+    # Assign base volume to main volume
+    for k in range(1, number_of_links + 1):
+        MainVolume[k] = 0
+    
+    # Set up the cost using FFTT
+    system_wide_travel_time = update_link_cost(MainVolume)
+    
+    # # Define the file path
+    # file_path = "link_performance.csv"
+    
+    # # Open the file in write mode
+    # with open(file_path, 'w') as link_performance_file:
+    #     # Write headers to the file
+    #     link_performance_file.write(
+    #         "iteration_no,link_id,from_node_id,to_node_id,volume,ref_volume,base_volume,obs_volume,"
+    #         "capacity,D,doc,fftt,travel_time,VDF_alpha,VDF_beta,VDF_plf,speed,VMT,VHT,PMT,PHT,"
+    #         "VHT_QVDF,PHT_QVDF,geometry\n"
+    #     )
+    
+    
+    
+    # for m in range(1, number_of_modes + 1):
+    #     link_performance_file.write(f"mod_vol_{g_mode_type_vector[m].mode_type},")
+    # link_performance_file.write(
+    #     "P,t0,t2,t3,vt2,mu,Q_gamma,free_speed,cutoff_speed,congestion_ref_speed,"
+    #     "avg_queue_speed,avg_QVDF_period_speed,avg_QVDF_period_travel_time,"
+    #     "Severe_Congestion_P,"
+    #)
+    
+    # # Write time interval speeds
+    # for t in range(demand_period_starting_hours * 60, demand_period_ending_hours * 60, 5):
+    #     hour = t // 60
+    #     minute = t % 60
+    #     link_performance_file.write(f"spd_{hour:02d}:{minute:02d},")
+    # link_performance_file.write("\n")
+    # Calculate the system least travel time
+    
+    
+    
+    system_least_travel_time = find_min_cost_routes(MDMinPathPredLink)
+    output_assessibility_matrix()
+    all_or_nothing_assign(0, MainVolume,MDMinPathPredLink)
+    
+    system_wide_travel_time = update_link_cost(MainVolume)
+    
+    
+    for iteration_no in range(1, assign_iterations):
+        system_least_travel_time = find_min_cost_routes(MDMinPathPredLink)
+        
+           
+        all_or_nothing_assign(iteration_no, SubVolume,MDMinPathPredLink)  # assign to the subvolume 
+    
+        volume_difference(SubVolume, MainVolume, SDVolume)
+    
+        lambda_ = links_sd_line_search(MainVolume, SDVolume)
+    
+        update_volume(MainVolume, SDVolume, lambda_)
+    
+        system_wide_travel_time = update_link_cost(MainVolume)
+    
+        gap = (system_wide_travel_time - system_least_travel_time) / max(0.1, system_least_travel_time) * 100
+    
+    #        print(f"Iter No = {iteration_no}, Lambda = {lambda_:.6f}, System VMT = {system_wide_travel_time:.1f}, Least TT = {system_least_travel_time:.1f}, Gap = {gap:.2f}%")
+            
+    output_route_details('route_assignment.csv')
+    write_link_performance()
+    # Output
+    print(f"System Least Travel Time: {system_least_travel_time:.2f}")
  
+# main program below   
+#osm2gmns_network()
+#trip_generation()   
+use_us_standard = False
+#traffic_assignment(0,use_us_standard) 
+#perform_simple_logit_model_for_trip_distribution(0.1)
+
+#use_us_standard = False
+traffic_assignment(2,use_us_standard)
