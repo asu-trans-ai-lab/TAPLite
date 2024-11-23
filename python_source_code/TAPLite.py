@@ -21,7 +21,7 @@ number_of_zones = 0
 number_of_modes = 1
 number_of_nodes = 0
 number_of_links = 0
-max_routes = 10;
+max_routes = 10
 first_thru_node = 0
 
 AssignIterations = 20
@@ -63,7 +63,7 @@ md_route_cost = None      # Placeholder for a 3D array
    
 class ModeType:
     """Represents a mode type with its associated attributes."""
-    def __init__(self, mode_type, vot, pce, occ, dedicated_shortest_path, demand_file):
+    def __init__(self, mode_type='', vot=0.0, pce=0.0, occ=0.0, dedicated_shortest_path=None, demand_file=''):
         self.mode_type = mode_type  # Mode type as a string
         self.vot = vot  # Value of time
         self.pce = pce  # Passenger car equivalent
@@ -757,7 +757,7 @@ def link_travel_time(k, volume):
     print(f"Processing Link {k}")
     
     if k >= len(g_link_vector):
-        print(f"Invalid index: {k} exceeds Link size {len(Link)}")
+        print(f"Invalid index: {k} exceeds Link size {len(g_link_vector[k])}")
        
     
 
@@ -955,9 +955,10 @@ def write_link_performance():
     print("g_link_vector initialization:")
     for link in g_link_vector:
         print(link)
-    
+
+    # mark: You can add more traffic modes here and update mode_type_vector.
     mode_type_vector = [
-        {"mode_type": "auto", "occ": 1.5},  # Example: Mode type 'car' with occupancy 1.5
+        ModeType(mode_type = 'auto', occ = 1.5)
     ]
 
     try:
@@ -1005,21 +1006,21 @@ def write_link_performance():
 
                 # Calculate VMT, VHT, PMT, PHT, VHT_QVDF, PHT_QVDF
                 VMT = VHT = PMT = PHT = VHT_QVDF = PHT_QVDF = 0
-                m  = 1 # for m, mode in enumerate(mode_type_vector, start=1):
-                VMT += link.mode_MainVolume[m] * link.length
-                VHT += link.mode_MainVolume[m] * link.Travel_time / 60.0
-                PMT += link.mode_MainVolume[m] * mode.occ * link.length
-                PHT += link.mode_MainVolume[m] * mode.occ * link.Travel_time / 60.0
-                VHT_QVDF += link.mode_MainVolume[m] * link.QVDF_TT / 60.0
-                PHT_QVDF += link.mode_MainVolume[m] * mode.occ * link.QVDF_TT / 60.0
+                for m, mode in enumerate(mode_type_vector, start=1):
+                    VMT += link.mode_MainVolume[m] * link.length
+                    VHT += link.mode_MainVolume[m] * link.Travel_time / 60.0
+                    PMT += link.mode_MainVolume[m] * mode.occ * link.length
+                    PHT += link.mode_MainVolume[m] * mode.occ * link.Travel_time / 60.0
+                    VHT_QVDF += link.mode_MainVolume[m] * link.QVDF_TT / 60.0
+                    PHT_QVDF += link.mode_MainVolume[m] * mode.occ * link.QVDF_TT / 60.0
 
                 # Create a row of data
                 row = [
                     iteration_no, link.link_id, link.external_from_node_id, link.external_to_node_id,
                     link.mode_MainVolume[m], link.Ref_volume, link.Base_volume, link.Obs_volume, link.Link_Capacity,
-                    IncomingDemand, DOC, link.FreeTravelTime, link.travel_time, link.VDF_Alpha, link.VDF_Beta,
+                    IncomingDemand, DOC, link.FreeTravelTime, link.Travel_time, link.VDF_Alpha, link.VDF_Beta,
                     link.VDF_plf, link.length / max(link.Travel_time / 60.0, 0.001),
-                    link.travel_time - link.FreeTravelTime, VMT, VHT, PMT, PHT, VHT_QVDF, PHT_QVDF,
+                    link.Travel_time - link.FreeTravelTime, VMT, VHT, PMT, PHT, VHT_QVDF, PHT_QVDF,
                     link.geometry
                 ]
 
@@ -1072,7 +1073,6 @@ def output_route_details(filename='route_assignment.csv'):
             for orig in range(1, len(g_link_indices[m])):
                 for dest in range(1, len(g_link_indices[m][orig])):
                     unique_routes = {}
-
 
                     for route_id, route in enumerate(g_link_indices[m][orig][dest]):
                         if route:  # Check if the route is non-empty
@@ -1367,8 +1367,8 @@ assign_iterations = 2
 
 for iteration_no in range(1, assign_iterations):
     system_least_travel_time = find_min_cost_routes(MDMinPathPredLink)
-    
-       
+
+
     all_or_nothing_assign(iteration_no, SubVolume)  # assign to the subvolume 
 
     volume_difference(SubVolume, MainVolume, SDVolume)
