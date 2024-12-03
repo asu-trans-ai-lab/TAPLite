@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import tensorflow as tf
+import os
 
 # Function to process network data
 def process_network_data(node_file, link_file, route_assignment_file):
@@ -24,7 +25,7 @@ def process_network_data(node_file, link_file, route_assignment_file):
     num_links = len(link_df)
     A_PL = np.zeros((num_paths, num_links), dtype=np.float32)
     for i, row in route_assignment_df.iterrows():
-        link_ids = [int(link_id) for link_id in str(row['link_ids']).split(';') if link_id.strip()]
+        link_ids = [int(link_id) for link_id in str(row['link_sequence']).split(';') if link_id.strip()]
         for link_id in link_ids:
             A_PL[i, link_id - 1] = 1  # Use 1-based indexing for link_id
 
@@ -65,7 +66,7 @@ def read_link_file(link_file):
     return tf.constant(f_L_obs), tf.constant(C_L), tf.constant(T_L_0)
 
 # Function to read demand data
-def read_demand_file(demand_file):
+def read_demand_file(demand_file, route_assignment):
     """
     Reads the demand.csv file to extract observed OD travel times or volumes.
     
@@ -76,6 +77,21 @@ def read_demand_file(demand_file):
     - T_OD_obs: Observed OD travel times or volumes.
     """
     demand_df = pd.read_csv(demand_file)
+    route_assignment_df = pd.read_csv(route_assignment_file)
+    init_od_df = route_assignment_df[['o_zone_id', 'd_zone_id']].drop_duplicates()
+
+    if init_od_df.shape[0] != demand_df.shape[0]:
+        print(f"WARNING: The length of target OD flows is {demand_df.shape[0]}, "
+              f"but the length of initial OD flows is {init_od_df.shape[0]}. ")
+        print()
+        print("Imputing the od flow target data to remove unmatched OD pairs...")
+        print(f" - Before removing, the unmatched target od volume is {demand_df['volume'].sum()}", )
+        demand_df = \
+            demand_df.merge(init_od_df[["o_zone_id", "d_zone_id"]], on=["o_zone_id", "d_zone_id"], how="inner")
+        print(f" - After processing, the target od volume is {demand_df['volume'].sum()}")
+    else:
+        print("The lengths of target and initial OD flows match, no action required.")
+
     if 'volume' not in demand_df.columns:
         raise ValueError("The 'volume' column is missing in demand.csv.")
     
@@ -158,18 +174,22 @@ def od_demand_estimation_with_observations(A_PL, B_OD_P, C_L, T_L_0, f_L_obs, T_
     return f_OD.numpy()
 
 # Main Execution
+# Define the file paths to access CSV files
+current_path = os.getcwd()
+upper_path = os.path.dirname(current_path)
+
 # File Paths
-node_file = "node.csv"  # Path to node file (not used in this function)
-link_file = "link.csv"  # Path to link file
-route_assignment_file = "route_assignment.csv"  # Path to route assignment file
-demand_file = "demand.csv"  # Path to demand file
+node_file = os.path.join(upper_path, "node.csv") #"node.csv"  # Path to node file (not used in this function)
+link_file = os.path.join(upper_path, "link.csv") #"link.csv"  # Path to link file
+route_assignment_file = os.path.join(upper_path, "route_assignment.csv")# "route_assignment.csv"  # Path to route assignment file
+demand_file = os.path.join(upper_path, "demand.csv") # "demand.csv"  # Path to demand file
 
 # Process network data
 A_PL, B_OD_P = process_network_data(node_file, link_file, route_assignment_file)
 
 # Read link and demand data
 f_L_obs, C_L, T_L_0 = read_link_file(link_file)
-T_OD_obs = read_demand_file(demand_file)
+T_OD_obs = read_demand_file(demand_file, route_assignment_file)
 
 # Run OD Demand Estimation
 estimated_f_OD = od_demand_estimation_with_observations(A_PL, B_OD_P, C_L, T_L_0, f_L_obs, T_OD_obs)
