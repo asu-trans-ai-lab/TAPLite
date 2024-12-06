@@ -1,4 +1,4 @@
-mode,route_seq_id,origin,destination,unique_route_id,node_sequence,link_ids,total_distance,total_free_flow_travel_time,total_travel_time
+mode,route_id,origin,destination,unique_route_id,node_ids,link_ids,total_distance,total_free_flow_travel_time,total_travel_time
 auto,1,1,2,1,1;2,1,6,6,6.00088
 auto,1,1,3,1,1;3,2,4,4,4.00902
 auto,1,1,4,1,3;1;3,6;2,8,8,8.31404
