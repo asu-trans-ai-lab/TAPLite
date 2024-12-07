@@ -2468,6 +2468,76 @@ def simu_main():
     simulate_traffic(vehicles, links, simulation_time_begining,simulation_time_ending)
 
 
+def link_queue_vdf(k, volume, incoming_demand, doc, p, t0, t2, t3, vt2, q_mu, q_gamma, congestion_ref_speed,
+                   avg_queue_speed, avg_qvdf_period_speed, severe_congestion_p, model_speed, link, demand_period_starting_hours, demand_period_ending_hours):
+    # Step 1: Calculate incoming demand and degree of congestion (DOC)
+    incoming_demand = (volume / max(0.01, link[k]['lanes']) /
+                       max(0.001, demand_period_ending_hours - demand_period_starting_hours) /
+                       max(0.0001, link[k]['vdf_plf']))
+    doc = incoming_demand / max(0.1, link[k]['lane_capacity'])
+    
+    # Step 2: Calculate travel time and congestion reference speed
+    travel_time = link[k]['free_travel_time'] * (1.0 + link[k]['vdf_alpha'] * (doc ** link[k]['vdf_beta']))
+    congestion_ref_speed = link[k]['cutoff_speed']
+    if doc < 1:
+        congestion_ref_speed = (1 - doc) * link[k]['free_speed'] + doc * link[k]['cutoff_speed']
+    
+    # Step 3: Calculate average queue speed
+    avg_queue_speed = congestion_ref_speed / (1.0 + link[k]['vdf_alpha'] * (doc ** link[k]['vdf_beta']))
+    
+    # Step 4: Calculate P and average QVDF period speed
+    p = link[k]['q_cd'] * (doc ** link[k]['q_n'])
+    h = demand_period_ending_hours - demand_period_starting_hours
+    if p > h:
+        avg_qvdf_period_speed = avg_queue_speed
+    else:
+        avg_qvdf_period_speed = (p / h * avg_queue_speed +
+                                 (1.0 - p / h) * (congestion_ref_speed + link[k]['free_speed']) / 2.0)
+    
+    link[k]['qvdf_tt'] = link[k]['length'] / max(0.1, avg_qvdf_period_speed) * 60.0
+    
+    # Step 5: Calculate vt2, t0, t2, t3
+    base = link[k]['q_cp'] * (p ** link[k]['q_s']) + 1.0
+    vt2 = link[k]['cutoff_speed'] / max(0.001, base)
+    t2 = (demand_period_starting_hours + demand_period_ending_hours) / 2.0
+    t0 = t2 - 0.5 * p
+    t3 = t2 + 0.5 * p
+    
+    # Step 6: Calculate Q_mu
+    q_mu = min(link[k]['lane_capacity'], incoming_demand / max(0.01, p))
+    
+    # Step 7: Calculate RTT, wt2, and Q_gamma
+    rtt = link[k]['length'] / max(0.01, congestion_ref_speed)
+    wt2 = link[k]['length'] / vt2 - rtt
+    q_gamma = wt2 * 64 * q_mu / (p ** 4)
+    
+    # Step 8: Initialize severe congestion variables
+    severe_congestion_p = 0
+    for t_in_min in range(int(demand_period_starting_hours * 60), int(demand_period_ending_hours * 60) + 1, 5):
+        t_interval = t_in_min // 5
+        t = t_in_min / 60.0
+        td_queue = 0
+        td_speed = 0
+        model_speed[t_interval] = link[k]['free_speed']
+        
+        if t0 <= t <= t3:
+            td_queue = 0.25 * q_gamma * ((t - t0) ** 2) * ((t - t3) ** 2)
+            td_w = td_queue / max(0.001, q_mu)
+            td_speed = link[k]['length'] / (td_w + rtt)
+        elif t < t0:
+            factor = (t - demand_period_starting_hours) / max(0.001, t0 - demand_period_starting_hours)
+            td_speed = (1 - factor) * link[k]['free_speed'] + factor * max(congestion_ref_speed, avg_queue_speed)
+        else:
+            factor = (t - t3) / max(0.001, demand_period_ending_hours - t3)
+            td_speed = (1 - factor) * max(congestion_ref_speed, avg_queue_speed) + factor * link[k]['free_speed']
+        
+        model_speed[t_interval] = td_speed
+        
+        if td_speed < link[k]['free_speed'] * 0.5:
+            severe_congestion_p += 5.0 / 60.0
+    
+    return p
+
 
 # main program below   
 osm2gmns_network()
