@@ -189,14 +189,8 @@ int Minpath(int m, int Orig, int* PredLink, double* Cost_to);
 double FindMinCostRoutes(int** MinPathPredLink);
 void All_or_Nothing_Assign(double** ODflow, int** MinPathPredLink, double* Volume);
 
-void InitLineSearch(void);
-void CloseLineSearch(void);
+
 double LinksSDLineSearch(double* MainVolume, double* SDVolume);
-
-void print_ls_header(FILE* fp);
-void ls_report(FILE* fp);
-
-
 
 
 /* Gloabal variables */
@@ -594,12 +588,12 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
 
 							if (linkIndices.size() > 0)
 							{
-						if (shortest_path_log_flag || Assignment_iteration_no == 0)
-						{
-							AddLinkSequence(m, Orig, Dest, Assignment_iteration_no, currentLinkSequence);
-							// Store the link sequence for this OD pair
+								if (shortest_path_log_flag || Assignment_iteration_no == 0)
+								{
+									AddLinkSequence(m, Orig, Dest, Assignment_iteration_no, currentLinkSequence);
+									// Store the link sequence for this OD pair
 
-						}
+								}
 						}
 						}
 
@@ -702,7 +696,7 @@ void OutputRouteDetails(const std::string& filename)
 	if (linkIndices.size() == 0)
 		return; 
 	// Write the CSV header in lowercase
-	outputFile << "mode,route_id,o_zone_id,d_zone_id,unique_route_id,node_ids,link_ids,total_distance,total_free_flow_travel_time,total_travel_time,route_key\n";
+	outputFile << "mode,route_id,o_zone_id,d_zone_id,unique_route_id,node_ids,link_ids,total_distance,total_free_flow_travel_time,total_travel_time,route_key,volume,\n";
 
 	for (int m = 1; m < linkIndices.size(); ++m)
 	{
@@ -712,6 +706,79 @@ void OutputRouteDetails(const std::string& filename)
 			{
 				std::unordered_map<std::string, bool> uniqueRoutes;
 				int unique_route_id = 1;
+				for (int route_id = 0; route_id < linkIndices[m][Orig][Dest].size(); ++route_id)
+				{
+					if (!linkIndices[m][Orig][Dest][route_id].empty())
+					{
+
+						//for (int route_id_2 = 0; route_id_2 < route_id; ++route_id_2)
+						//{  // mimic the route swiching machanisum, from route_id_2 to route_id, using the step size 
+						//}
+					
+						double totalDistance = 0.0;
+						double totalFreeFlowTravelTime = 0.0;
+						double totalTravelTime = 0.0;
+						std::string nodeIDsStr;
+						std::string linkIDsStr;
+
+						int nodeSum = 0;  // Sum of node IDs
+						int linkSum = 0;  // Sum of link IDs
+
+						// Collect node IDs, link indices, compute total distance, travel times, and calculate sums
+						for (int i = linkIndices[m][Orig][Dest][route_id].size() - 1; i >= 0; --i)
+						{
+							int k = linkIndices[m][Orig][Dest][route_id][i];
+
+							// Append the from_node_id for each link and calculate the node sum
+							int fromNodeID = Link[k].external_from_node_id;
+							nodeIDsStr += std::to_string(fromNodeID) + ";";
+							nodeSum += fromNodeID;
+
+							// Append the link index (link ID) to the string and calculate the link sum
+							linkIDsStr += std::to_string(k) + ";";
+							linkSum += k;
+
+							// Sum up the total distance and travel times
+							totalDistance += Link[k].length;
+							totalFreeFlowTravelTime += Link[k].FreeTravelTime;
+							totalTravelTime += Link[k].Travel_time;
+
+							// For the last link, also add the to_node_id
+							if (i == 0)
+							{
+								int toNodeID = Link[k].external_to_node_id;
+								nodeIDsStr += std::to_string(toNodeID);
+								nodeSum += toNodeID;
+							}
+						}
+
+						// Create a unique key based on the node sum and link sum
+						std::string routeKey = std::to_string(nodeSum) + "_" + std::to_string(linkSum);
+
+						// Check if this route (based on node and link sums) is already output
+						if (uniqueRoutes.find(routeKey) == uniqueRoutes.end())
+						{
+							// This is a unique route, store it in the hash table
+							uniqueRoutes[routeKey] = true;
+
+
+							unique_route_id++;
+						}
+						//else
+						//{
+						//    // Duplicate path found, skipping output
+						//    //std::cout << "Duplicate route skipped for Origin: " << Orig << ", Destination: " << Dest << "\n";
+						//}
+					}
+				}
+
+
+
+				///////////////////////////////////// print out 
+				uniqueRoutes.clear();
+				int unique_route_id_size = unique_route_id; 
+				unique_route_id = 1; 
+
 				for (int route_id = 0; route_id < linkIndices[m][Orig][Dest].size(); ++route_id)
 				{
 					if (!linkIndices[m][Orig][Dest][route_id].empty())
@@ -766,11 +833,14 @@ void OutputRouteDetails(const std::string& filename)
 							if (!linkIDsStr.empty())
 								linkIDsStr.pop_back();
 
+
+							float od_volume = MDODflow[m][Orig][Dest];
+							float route_volume = od_volume / unique_route_id_size;
 							// Write the data for this OD pair and route to the CSV file
 							outputFile << g_mode_type_vector[m].mode_type.c_str() << "," << route_id << "," << Orig << "," << Dest << "," << unique_route_id << ","
 								<< nodeIDsStr << "," << linkIDsStr << ","
 								<< totalDistance << "," << totalFreeFlowTravelTime << ","
-								<< totalTravelTime << "," << routeKey.c_str() << "\n";
+								<< totalTravelTime << "," << routeKey.c_str() << "," << route_volume << "\n";
 
 							unique_route_id++;
 						}
@@ -781,6 +851,7 @@ void OutputRouteDetails(const std::string& filename)
 						//}
 					}
 				}
+
 			}
 		}
 	}
@@ -796,7 +867,7 @@ void OutputODPerformance(const std::string& filename)
 	std::ofstream outputFile(filename);  // Open the file for writing
 
 	// Write the CSV header in lowercase
-	outputFile << "mode,o_zone_id,d_zone_id,total_distance,total_free_flow_travel_time,total_congestion_travel_time\n";
+	outputFile << "mode,o_zone_id,d_zone_id,total_distance,total_free_flow_travel_time,total_congestion_travel_time,volume,\n";
 
 	for (int m = 1; m < linkIndices.size(); ++m)
 	{
@@ -860,10 +931,11 @@ void OutputODPerformance(const std::string& filename)
 							if (!linkIDsStr.empty())
 								linkIDsStr.pop_back();
 
+							float volume = MDODflow[m][Orig][Dest]; 
 							// Write the data for this OD pair and route to the CSV file
 							outputFile << g_mode_type_vector[m].mode_type.c_str() << "," << Orig << "," << Dest << ","
 								<< totalDistance << "," << totalFreeFlowTravelTime << ","
-								<< totalTravelTime << "\n";
+								<< totalTravelTime << "," << volume << "\n";
 
 							unique_route_id++;
 						}
@@ -1296,7 +1368,7 @@ int main(int argc, char** argv)
 	
 		// MSA options
 	 //   Lambda = 1.0 / (iteration_no + 1);
-		// UpdateFWstatus(MainVolume, SDVolume, &fw_status);
+
 
 
 		UpdateVolume(MainVolume, SDVolume, Lambda);  // x(k+1) = x(k) +lambda * (y-x) MainVolume is MainVolume
@@ -1482,7 +1554,6 @@ static void Init(int int_number_of_modes, int input_no_zones)
 			}
 		}
 	}
-	InitLineSearch();
 }
 
 static void Close()
@@ -1491,7 +1562,7 @@ static void Close()
 	// tuiClose(tuiFileName);
 	CloseLinks();
 	CloseODflow();
-	CloseLineSearch();
+
 }
 
 
@@ -2441,3 +2512,106 @@ double LinksSDLineSearch(double* MainVolume, double* SDVolume) {
 	return lambdaleft;
 }
 
+#include <iostream>
+#include <vector>
+#include <queue>
+#include <unordered_map>
+
+using namespace std;
+
+// Define constants and structures
+const int T = 100; // Total simulation time
+const int MAX_LINKS = 100; // Maximum number of links
+
+struct Vehicle {
+	int id;
+	vector<int> path; // Sequence of links
+	int currentLink;
+	int TA; // Arrival time at the current link
+	int TD; // Departure time from the current link
+	int passengers; // Number of passengers in the vehicle
+	int capacity; // Maximum passenger capacity
+};
+
+struct Link {
+	int id;
+	int FFTT; // Free-flow travel time
+	double capacity; // Current available capacity
+	queue<int> waitingQueue; // Vehicles waiting to enter the link
+	vector<int> A; // Cumulative arrival counts
+	vector<int> D; // Cumulative departure counts
+};
+
+// Function to simulate traffic
+//void simulateTraffic(vector<Vehicle>& vehicles, vector<Link>& links, int totalTime) {
+//	for (int t = 0; t < totalTime; ++t) { // Time loop
+//		for (auto& link : links) { // Link loop
+//			// Update link capacity based on arrivals and departures
+//			if (t > 0) {
+//				link.capacity -= (link.A[t - 1] - link.D[t - 1]);
+//			}
+//
+//			for (auto& vehicle : vehicles) { // Vehicle loop
+//				if (vehicle.currentLink == link.id && vehicle.TD == t) {
+//					// Check if vehicle can move
+//					if (link.capacity >= 1.0) {
+//						// Move vehicle to the next link in its path
+//						if (vehicle.currentLink + 1 < vehicle.path.size()) {
+//							int nextLinkId = vehicle.path[vehicle.currentLink + 1];
+//							auto& nextLink = links[nextLinkId];
+//
+//							vehicle.TA = t;
+//							vehicle.TD = t + nextLink.FFTT;
+//
+//							// Update link capacities
+//							link.capacity -= 1.0; // Assuming 1 PCE for simplicity
+//							nextLink.capacity -= 1.0;
+//
+//							// Update cumulative flow counts
+//							link.D[t]++;
+//							nextLink.A[t]++;
+//
+//							// Update vehicle state
+//							vehicle.currentLink++;
+//						}
+//					}
+//					else {
+//						// Vehicle waits if no capacity is available
+//						vehicle.TD = t + 1;
+//					}
+//				}
+//			}
+//		}
+//	}
+//}
+
+//int Simu_main() {
+//	// Create sample vehicles
+//	vector<Vehicle> vehicles = {
+//		{0, {0, 1, 2}, 0, 0, 0, 4, 4}, // id, path, currentLink, TA, TD, passengers, capacity
+//		{1, {1, 2, 3}, 0, 0, 0, 3, 4}
+//	};
+//
+//	// Create sample links
+//	vector<Link> links(MAX_LINKS);
+//	for (int i = 0; i < MAX_LINKS; ++i) {
+//		links[i] = { i, 5, 10.0, queue<int>(), vector<int>(T, 0), vector<int>(T, 0) };
+//	}
+//
+//	// Run the simulation
+//	simulateTraffic(vehicles, links, T);
+//
+//	// Print results
+//	for (const auto& link : links) {
+//		cout << "Link " << link.id << ": " << endl;
+//		cout << "Arrival Counts: ";
+//		for (int t = 0; t < T; ++t) cout << link.A[t] << " ";
+//		cout << endl;
+//
+//		cout << "Departure Counts: ";
+//		for (int t = 0; t < T; ++t) cout << link.D[t] << " ";
+//		cout << endl;
+//	}
+//
+//	return 0;
+//}
