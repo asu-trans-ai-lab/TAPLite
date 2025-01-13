@@ -145,6 +145,7 @@ struct mode_type {
 
 
 mode_type g_mode_type_vector[MAX_MODE_TYPES];
+int g_metric_system_flag = 0; 
 void StatusMessage(const char* group, const char* format, ...);
 void ExitMessage(const char* format, ...);
 #include "TAPlite.h"
@@ -196,7 +197,7 @@ double LinksSDLineSearch(double* MainVolume, double* SDVolume);
 /* Gloabal variables */
 
 int no_zones, number_of_modes, no_nodes, number_of_links, FirstThruNode;
-int AssignIterations = 20;
+int TotalAssignIterations = 20;
 int demand_period_starting_hours = 7;
 int	demand_period_ending_hours = 8;
 int g_tap_log_file = 0;
@@ -490,6 +491,33 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
 		}
 	}
 	//StatusMessage("Assign", "Starting assign.");
+
+	if(Assignment_iteration_no == 0)
+	{
+		printf("The list of zero-volume zones:");
+		for (int Orig = 1; Orig <= no_zones; Orig++)
+		{
+
+			if (TotalOFlow[Orig] < 0.00001)  // only work on positive zone flow 
+			{ 
+				printf("%d,", Orig);
+			}
+
+		}
+
+		printf("\n");
+
+		printf("The list of zones without outbound connecting links:");
+		for (int Orig = 1; Orig <= no_zones; Orig++)
+		{
+
+			if (zone_outbound_link_size[Orig] == 0)  // there is no outbound link from the origin 
+			{
+				printf("%d,", Orig);
+			}
+		}
+		printf("\n");
+	}
 #pragma omp parallel for
 	for (int p = 0; p < g_number_of_processors; p++)
 	{
@@ -607,7 +635,7 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
 
 	}
 
-	if (AssignIterations == 0)  // with base demand
+	if (Assignment_iteration_no == 0)  // with base demand
 	{
 		for (int k = 1; k <= number_of_links; k++)
 		{
@@ -698,7 +726,7 @@ void OutputRouteDetails(const std::string& filename)
 	if (linkIndices.size() == 0)
 		return; 
 	// Write the CSV header in lowercase
-	outputFile << "mode,route_id,o_zone_id,d_zone_id,unique_route_id,node_ids,link_ids,total_distance,total_free_flow_travel_time,total_travel_time,route_key,volume,\n";
+	outputFile << "mode,route_id,o_zone_id,d_zone_id,unique_route_id,node_ids,link_ids,total_distance_mile,total_distance_km,total_free_flow_travel_time,total_travel_time,route_key,volume,\n";
 
 
 
@@ -847,7 +875,7 @@ void OutputRouteDetails(const std::string& filename)
 							outputFile << g_mode_type_vector[m].mode_type.c_str() << ","
 								<< route_id << "," << Orig << "," << Dest << "," << unique_route_id << ","
 								<< nodeIDsStr << "," << linkIDsStr << ","
-								<< totalDistance << "," << totalFreeFlowTravelTime << ","
+								<< totalDistance << "," << totalDistance*1.609 << "," << totalFreeFlowTravelTime << ","
 								<< totalTravelTime << "," << routeKey.c_str() << "," << route_volume << "\n";
 
 							unique_route_id++;
@@ -878,7 +906,7 @@ void OutputODPerformance(const std::string& filename)
 	std::ofstream outputFile(filename);  // Open the file for writing
 
 	// Write the CSV header in lowercase
-	outputFile << "mode,o_zone_id,d_zone_id,total_distance,total_free_flow_travel_time,total_congestion_travel_time,volume,\n";
+	outputFile << "mode,o_zone_id,d_zone_id,total_distance_mile,total_distance_km,total_free_flow_travel_time,total_congestion_travel_time,volume,\n";
 	double grand_totalDistance = 0.0;
 	double grand_totalFreeFlowTravelTime = 0.0;
 	double grand_totalTravelTime = 0.0;
@@ -956,7 +984,7 @@ void OutputODPerformance(const std::string& filename)
 							grand_total_count += volume;
 							// Write the data for this OD pair and route to the CSV file
 							outputFile << g_mode_type_vector[m].mode_type.c_str() << "," << Orig << "," << Dest << ","
-								<< totalDistance << "," << totalFreeFlowTravelTime << ","
+								<< totalDistance << "," << totalDistance*1.609 << "," << totalFreeFlowTravelTime << ","
 								<< totalTravelTime << "," << volume << "\n";
 
 							unique_route_id++;
@@ -982,7 +1010,7 @@ void OutputODPerformance(const std::string& filename)
 		<< ", avg total travel time = "
 		<< grand_totalTravelTime / grand_total_count << " min"
 		<< ", avg travel time index = "
-		<< grand_totalTravelTime / grand_totalFreeFlowTravelTime << " min"
+		<< grand_totalTravelTime / grand_totalFreeFlowTravelTime << " "
 		<< std::endl;
 	// Close the file after writing
 	outputFile.close();
@@ -1076,10 +1104,10 @@ void createSettingsFile(const std::string& fileName) {
 	}
 
 	// Writing the headers of the CSV
-	file << "number_of_iterations,number_of_processors,demand_period_starting_hours,demand_period_ending_hours,base_demand_mode,route_output,log_file,odme_mode,odme_vmt\n";
+	file << "metric_system,number_of_iterations,number_of_processors,demand_period_starting_hours,demand_period_ending_hours,base_demand_mode,route_output,log_file,odme_mode,odme_vmt\n";
 
 	// Writing the sample data (from your provided file)
-	file << "10,8,14,18,0,0,0,0,0\n";
+	file << "0,10,8,14,18,0,0,0,0,0\n";
 
 	file.close();
 	std::cout << "sample_settings.csv file created successfully!" << std::endl;
@@ -1098,7 +1126,8 @@ void read_settings_file()
 			// field headers.
 		{
 			g_number_of_processors = 4;
-			parser_settings.GetValueByFieldName("number_of_iterations", AssignIterations);
+			parser_settings.GetValueByFieldName("metric_system", g_metric_system_flag);
+			parser_settings.GetValueByFieldName("number_of_iterations", TotalAssignIterations);
 			parser_settings.GetValueByFieldName("number_of_processors", g_number_of_processors);
 			parser_settings.GetValueByFieldName("demand_period_starting_hours", demand_period_starting_hours);
 			parser_settings.GetValueByFieldName("demand_period_ending_hours", demand_period_ending_hours);
@@ -1237,7 +1266,7 @@ int main(int argc, char** argv)
 
 	read_settings_file();
 	read_mode_type_file();
-
+	fopen_s(&logfile, "TAP_log.csv", "w");  // Open the log file for writing.
 	no_nodes = get_number_of_nodes_from_node_file(no_zones, FirstThruNode);
 	number_of_links = get_number_of_links_from_link_file();
 
@@ -1256,7 +1285,7 @@ int main(int argc, char** argv)
 	fclose(link_performance_file);
 
 	fopen_s(&link_performance_file, "link_performance.csv", "a+");
-	fopen_s(&logfile, "TAP_log.csv", "w");  // Open the log file for writing.
+
 
 	double system_wide_travel_time = 0;
 	double system_least_travel_time = 0;
@@ -1270,7 +1299,7 @@ int main(int argc, char** argv)
 	Init(number_of_modes, no_zones);
 
 
-    InitializeLinkIndices(number_of_modes, no_zones, AssignIterations);
+    InitializeLinkIndices(number_of_modes, no_zones, TotalAssignIterations);
 
 
 		for (int Orig = 1; Orig <= no_zones; Orig++)  // initialization 
@@ -1283,7 +1312,9 @@ int main(int argc, char** argv)
 
 	int iteration_no = 0;
 	MainVolume = (double*)Alloc_1D(number_of_links, sizeof(double));
-	SDVolume = SubVolume = (double*)Alloc_1D(
+	SDVolume = (double*)Alloc_1D(
+		number_of_links, sizeof(double)); /* Compute search direction and sub-volume in the same place. */
+	SubVolume = (double*)Alloc_1D(
 		number_of_links, sizeof(double)); /* Compute search direction and sub-volume in the same place. */
 	MDMinPathPredLink = (int***)Alloc_3D(number_of_modes, no_zones, no_nodes, sizeof(int));
 
@@ -1299,7 +1330,7 @@ int main(int argc, char** argv)
 
 	fprintf(link_performance_file,
 		"iteration_no,link_id,from_node_id,to_node_id,volume,ref_volume,base_volume,obs_volume,"
-		"capacity,D,doc,fftt,travel_time,VDF_alpha,VDF_beta,VDF_plf,speed,VMT,VHT,PMT,PHT,VHT_QVDF,PHT_QVDF,geometry,");
+		"capacity,D,doc,fftt,travel_time,VDF_alpha,VDF_beta,VDF_plf,speed_mph,speed_kmph,VMT,VHT,PMT,PHT,VHT_QVDF,PHT_QVDF,geometry,");
 
 	fprintf(logfile, "iteration_no,link_id,from_node_id,to_node_id,volume,ref_volume,obs_volume,capacity,doc,fftt,travel_time,delay,");
 
@@ -1317,14 +1348,14 @@ int main(int argc, char** argv)
 	for (int m = 1; m <= number_of_modes; m++)
 		fprintf(link_performance_file, "mod_vol_%s,", g_mode_type_vector[m].mode_type.c_str());
 
-	fprintf(link_performance_file, "P,t0,t2,t3,vt2,mu,Q_gamma,free_speed,cutoff_speed,congestion_ref_speed,avg_queue_speed,avg_QVDF_period_speed,avg_QVDF_period_travel_time,Severe_Congestion_P,");
+	fprintf(link_performance_file, "P,t0,t2,t3,vt2_mph,vt2_kmph,mu,Q_gamma,free_speed_mph,cutoff_speed_mph,free_speed_kmph,cutoff_speed_kmph,congestion_ref_speed_mph,avg_queue_speed_mph,avg_QVDF_period_speed_mph,congestion_ref_speed_kmph,avg_queue_speed_kmph,avg_QVDF_period_speed_kmph,avg_QVDF_period_travel_time,Severe_Congestion_P,");
 
 	for (int t = demand_period_starting_hours * 60; t < demand_period_ending_hours * 60; t += 5)
 	{
 		int hour = t / 60;
 		int minute = t - hour * 60;
 
-		fprintf(link_performance_file, "spd_%02d:%02d,", hour, minute);
+		fprintf(link_performance_file, "spd_mph_%02d:%02d,", hour, minute);
 	}
 
 	fprintf(link_performance_file, "\n");
@@ -1376,7 +1407,7 @@ int main(int argc, char** argv)
 	auto start0 = std::chrono::high_resolution_clock::now();  // Start timing
 
 
-	for (iteration_no = 1; iteration_no < AssignIterations; iteration_no++)
+	for (iteration_no = 1; iteration_no < TotalAssignIterations; iteration_no++)
 	{
 		system_least_travel_time = FindMinCostRoutes(MDMinPathPredLink);  // the one right before the assignment iteration 
 		
@@ -1505,7 +1536,7 @@ int main(int argc, char** argv)
 		double avg_QVDF_period_speed = 0;
 		double IncomingDemand = 0;
 		double DOC = 0;
-		Link_QueueVDF(k, MainVolume[k], IncomingDemand, DOC, P, t0, t2, t3, vt2, mu, Q_gamma, congestion_ref_speed, avg_queue_speed, avg_QVDF_period_speed, Severe_Congestion_P, model_speed);
+		Link_QueueVDF(k, MainVolume[k], IncomingDemand, DOC, P, t0, t2, t3, vt2,  mu, Q_gamma, congestion_ref_speed, avg_queue_speed, avg_QVDF_period_speed, Severe_Congestion_P, model_speed);
 
 
 		double VMT, VHT, PMT, PHT, VHT_QVDF, PHT_QVDF;
@@ -1524,10 +1555,10 @@ int main(int argc, char** argv)
 
 		}
 
-		fprintf(link_performance_file, "%d,%d,%d,%d,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,",
+		fprintf(link_performance_file, "%d,%d,%d,%d,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,",
 			iteration_no, Link[k].link_id, Link[k].external_from_node_id, Link[k].external_to_node_id,
 			MainVolume[k], Link[k].Ref_volume, Link[k].Base_volume, Link[k].Obs_volume, Link[k].Link_Capacity, IncomingDemand, DOC, Link[k].FreeTravelTime,
-			Link[k].Travel_time, Link[k].VDF_Alpha, Link[k].VDF_Beta, Link[k].VDF_plf, Link[k].length / fmax(Link[k].Travel_time / 60.0, 0.001), Link[k].Travel_time - Link[k].FreeTravelTime);
+			Link[k].Travel_time, Link[k].VDF_Alpha, Link[k].VDF_Beta, Link[k].VDF_plf, Link[k].length / fmax(Link[k].Travel_time / 60.0, 0.001), Link[k].length / fmax(Link[k].Travel_time / 60.0, 0.001)*1.609, Link[k].Travel_time - Link[k].FreeTravelTime);
 
 		fprintf(link_performance_file, "%2lf,%2lf,%2lf,%2lf,%2lf,%2lf,", VMT, VHT, PMT, PHT, VHT_QVDF, PHT_QVDF);
 
@@ -1537,8 +1568,11 @@ int main(int argc, char** argv)
 		for (int m = 1; m <= number_of_modes; m++)
 			fprintf(link_performance_file, "%2lf,", Link[k].mode_MainVolume[m]);
 
-		fprintf(link_performance_file, "%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,", P, t0, t2, t3, vt2, mu, Q_gamma, Link[k].free_speed, Link[k].Cutoff_Speed,
-			congestion_ref_speed, avg_queue_speed, avg_QVDF_period_speed, Link[k].QVDF_TT, Severe_Congestion_P);
+		fprintf(link_performance_file, "%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,", P, t0, t2, t3, vt2, vt2 * 1.609, mu, Q_gamma,
+			Link[k].free_speed, Link[k].Cutoff_Speed, Link[k].free_speed*1.609, Link[k].Cutoff_Speed * 1.609,
+			congestion_ref_speed, avg_queue_speed, avg_QVDF_period_speed, 
+			congestion_ref_speed * 1.609, avg_queue_speed * 1.609, avg_QVDF_period_speed * 1.609,
+			Link[k].QVDF_TT, Severe_Congestion_P);
 		for (int t = demand_period_starting_hours * 60; t < demand_period_ending_hours * 60; t += 5)
 		{
 			int t_interval = t / 5;
@@ -1559,6 +1593,8 @@ int main(int argc, char** argv)
 	}
 	free(MainVolume);
 	free(SubVolume);
+	free(SDVolume);
+
 	Free_3D((void***)MDMinPathPredLink, number_of_modes, no_zones, no_nodes);
 
 	Close();
@@ -1643,6 +1679,9 @@ void ReadLinks()
 			parser_link.GetValueByFieldName("capacity", capacity);
 			parser_link.GetValueByFieldName("free_speed", free_speed);
 
+			if (g_metric_system_flag == 1)
+				free_speed = free_speed / 1.609;
+
 			if (lanes <= 0 || capacity < 0.0001 || free_speed < 0.0001)
 				continue; 
 
@@ -1694,6 +1733,10 @@ void ReadLinks()
 
 
 			parser_link.GetValueByFieldName("length", Link[k].length);
+
+			if (g_metric_system_flag == 1)
+				Link[k].length = Link[k].length / 1609;
+
 			parser_link.GetValueByFieldName("ref_volume", Link[k].Ref_volume);
 
 			if (g_ODME_mode == 1)
@@ -2272,6 +2315,11 @@ void VolumeDifference(double* Volume1, double* Volume2, double* Difference)
 		for (int m = 1; m <= number_of_modes; m++)
 		{
 			Link[k].mode_SDVolume[m] = Link[k].mode_SubVolume[m] - Link[k].mode_MainVolume[m];
+
+			if (fabs(Difference[k] - Link[k].mode_SDVolume[m]) > 0.01)
+			{
+				printf("");
+			}
 		}
 	}
 }
