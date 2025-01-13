@@ -523,6 +523,8 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
 					if (Dest == Orig)
 						continue;
 
+					if (zone_outbound_link_size[Dest] == 0)  // there is no outbound or inbound link from the origin zone
+						continue;
 
 					if (shortest_path_log_flag || Assignment_iteration_no == 0)
 						currentLinkSequence.clear();
@@ -698,6 +700,8 @@ void OutputRouteDetails(const std::string& filename)
 	// Write the CSV header in lowercase
 	outputFile << "mode,route_id,o_zone_id,d_zone_id,unique_route_id,node_ids,link_ids,total_distance,total_free_flow_travel_time,total_travel_time,route_key,volume,\n";
 
+
+
 	for (int m = 1; m < linkIndices.size(); ++m)
 	{
 		for (int Orig = 1; Orig < linkIndices[m].size(); ++Orig)
@@ -833,11 +837,15 @@ void OutputRouteDetails(const std::string& filename)
 							if (!linkIDsStr.empty())
 								linkIDsStr.pop_back();
 
-
 							float od_volume = MDODflow[m][Orig][Dest];
 							float route_volume = od_volume / unique_route_id_size;
+
+
+
+
 							// Write the data for this OD pair and route to the CSV file
-							outputFile << g_mode_type_vector[m].mode_type.c_str() << "," << route_id << "," << Orig << "," << Dest << "," << unique_route_id << ","
+							outputFile << g_mode_type_vector[m].mode_type.c_str() << ","
+								<< route_id << "," << Orig << "," << Dest << "," << unique_route_id << ","
 								<< nodeIDsStr << "," << linkIDsStr << ","
 								<< totalDistance << "," << totalFreeFlowTravelTime << ","
 								<< totalTravelTime << "," << routeKey.c_str() << "," << route_volume << "\n";
@@ -858,7 +866,10 @@ void OutputRouteDetails(const std::string& filename)
 
 	// Close the file after writing
 	outputFile.close();
+
+
 	std::cout << "Output written to " << filename << std::endl;
+
 }
 
 
@@ -868,6 +879,11 @@ void OutputODPerformance(const std::string& filename)
 
 	// Write the CSV header in lowercase
 	outputFile << "mode,o_zone_id,d_zone_id,total_distance,total_free_flow_travel_time,total_congestion_travel_time,volume,\n";
+	double grand_totalDistance = 0.0;
+	double grand_totalFreeFlowTravelTime = 0.0;
+	double grand_totalTravelTime = 0.0;
+	double grand_total_count = 0;
+
 
 	for (int m = 1; m < linkIndices.size(); ++m)
 	{
@@ -932,6 +948,12 @@ void OutputODPerformance(const std::string& filename)
 								linkIDsStr.pop_back();
 
 							float volume = MDODflow[m][Orig][Dest]; 
+
+
+							grand_totalDistance += totalDistance * volume;
+							grand_totalFreeFlowTravelTime += totalFreeFlowTravelTime * volume;
+							grand_totalTravelTime += totalTravelTime * volume;
+							grand_total_count += volume;
 							// Write the data for this OD pair and route to the CSV file
 							outputFile << g_mode_type_vector[m].mode_type.c_str() << "," << Orig << "," << Dest << ","
 								<< totalDistance << "," << totalFreeFlowTravelTime << ","
@@ -950,7 +972,18 @@ void OutputODPerformance(const std::string& filename)
 			}
 		}
 	}
+	if (grand_total_count < 0.001)
+		grand_total_count = 0.001;
 
+	std::cout << "OD performance summary: avg distance = "
+		<< grand_totalDistance / grand_total_count << " miles, "
+		<< ", avg free-flow travel time = "
+		<< grand_totalFreeFlowTravelTime / grand_total_count << " min, "
+		<< ", avg total travel time = "
+		<< grand_totalTravelTime / grand_total_count << " min"
+		<< ", avg travel time index = "
+		<< grand_totalTravelTime / grand_totalFreeFlowTravelTime << " min"
+		<< std::endl;
 	// Close the file after writing
 	outputFile.close();
 	std::cout << "Output written to " << filename << std::endl;
@@ -1151,6 +1184,8 @@ void read_mode_type_file()
 		g_mode_type_vector[1].dedicated_shortest_path = 1;  // reset; 
 		number_of_modes = 1;
 	}
+
+	printf("number_of_modes = %d\n", number_of_modes);
 	return;
 }
 // Initialize the 5D vector
@@ -1599,12 +1634,23 @@ void ReadLinks()
 		while (parser_link.ReadRecord())  // if this line contains [] mark, then we will also read
 			// field headers.
 		{
-			Link[k].setup(number_of_modes);
-			std::string value;
 			// CLink link;
 			int lanes = 1;
 			float capacity = 0;
 			float free_speed = 10;
+
+			parser_link.GetValueByFieldName("lanes", lanes);
+			parser_link.GetValueByFieldName("capacity", capacity);
+			parser_link.GetValueByFieldName("free_speed", free_speed);
+
+			if (lanes <= 0 || capacity < 0.0001 || free_speed < 0.0001)
+				continue; 
+
+
+			Link[k].setup(number_of_modes);
+			std::string value;
+
+
 
 			// Read link_id
 			parser_link.GetValueByFieldName("from_node_id", Link[k].external_from_node_id);
@@ -1671,14 +1717,14 @@ void ReadLinks()
 
 				}
 			}
-			parser_link.GetValueByFieldName("lanes", lanes);
-			parser_link.GetValueByFieldName("capacity", capacity);
+
+
 
 			Link[k].lanes = lanes;
 			Link[k].Lane_Capacity = capacity;
 			Link[k].Link_Capacity = lanes * capacity;
 
-			parser_link.GetValueByFieldName("free_speed", free_speed);
+
 			parser_link.GetValueByFieldName("allowed_use", Link[k].allowed_uses);
 
 			if (g_tap_log_file == 1)
@@ -1887,7 +1933,10 @@ int Read_ODtable(double*** ODtable, double*** DiffODtable, int no_zones)
 
 		if (file == NULL)
 		{
+			if (g_mode_type_vector[m].demand_file.length() > 0)
+			{
 			printf("Failed to open demand file %s\n", g_mode_type_vector[m].demand_file.c_str());
+			}
 			return 0;
 		}
 
@@ -2415,15 +2464,22 @@ int Read_ODflow(double* TotalODflow, int* number_of_modes, int* no_zones)
 	
 
 	// checking 
+	int total_infeasible_outbound_zones = 0; 
+	float total_infeasible_outbound_zone_demand = 0;
+	float total_zone_demand = 0;
 	for (int z = 1; z < *no_zones; z++)
 	{
 		if (zone_outbound_link_size[z] == 0 && TotalOFlow[z]>0.01)
 		{
 			printf("Error: There is no outbound link from zone %d with positive demand %f\n", z, TotalOFlow[z]);
-
+			total_infeasible_outbound_zones++; 
+			total_infeasible_outbound_zone_demand += TotalOFlow[z];
 		}
-
+		total_zone_demand += TotalOFlow[z];
 	}
+	printf("Error: %d zones have no outbound link with positive demand %f, = %f percentage of total demand\n", total_infeasible_outbound_zones,
+		total_infeasible_outbound_zone_demand, total_infeasible_outbound_zone_demand*100/fmax(0.01, total_zone_demand));
+
 
 	*TotalODflow = (double)RealTotal;
 
