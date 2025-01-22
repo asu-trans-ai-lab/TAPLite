@@ -364,19 +364,8 @@ sorted_list CopySortedList(sorted_list list);
 
 
 
-void InitLineSearch(void) {
-    // tuiGetInt("Line search iterations {LSITE}", FALSE, &MinLineSearchIterations);
-}
 
-void CloseLineSearch(void) {}
 
-void print_ls_header(FILE* fp) {
-    fprintf(fp, "LS iterations \tStep size \t");
-}
-
-void ls_report(FILE* fp) {
-    fprintf(fp, "%d \t%g \t", ActualIterations, LastLambda);
-}
 
 /* Create a new list item */
 static list_item* CreateListItem(int value) {

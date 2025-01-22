@@ -33,6 +33,10 @@
 #include <algorithm>
 #include <omp.h>
 #include <chrono>  // for high_resolution_clock
+
+#include <iomanip> // For std::setw and std::setfill
+
+
 #define MAX_MODE_TYPES  10
 
 //#ifndef _win32
@@ -135,12 +139,14 @@ struct link_record {
 };
 
 struct mode_type {
-	std::string mode_type;
+	std::string mode_type ;
 	float vot;
 	float pce;
 	float occ;
 	int dedicated_shortest_path;
 	std::string demand_file;
+
+		
 };
 
 
@@ -497,8 +503,8 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
 		printf("The list of zero-volume zones:");
 		for (int Orig = 1; Orig <= no_zones; Orig++)
 		{
-
-			if (TotalOFlow[Orig] < 0.00001)  // only work on positive zone flow 
+			
+			if (g_map_external_node_id_2_node_seq_no.find(Orig) != g_map_external_node_id_2_node_seq_no.end() && TotalOFlow[Orig] < 0.00001)  // only work on positive zone flow 
 			{ 
 				printf("%d,", Orig);
 			}
@@ -511,7 +517,7 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
 		for (int Orig = 1; Orig <= no_zones; Orig++)
 		{
 
-			if (zone_outbound_link_size[Orig] == 0)  // there is no outbound link from the origin 
+			if (g_map_external_node_id_2_node_seq_no.find(Orig) != g_map_external_node_id_2_node_seq_no.end()  && zone_outbound_link_size[Orig] == 0)  // there is no outbound link from the origin 
 			{
 				printf("%d,", Orig);
 			}
@@ -900,6 +906,277 @@ void OutputRouteDetails(const std::string& filename)
 
 }
 
+constexpr auto LCG_a = 17364;
+constexpr auto LCG_c = 0;
+constexpr auto LCG_M = 65521; // 16-bit memory-saving LCG
+unsigned int RandomSeed = 12345; // Initial random seed
+
+// Function to generate random numbers using LCG
+float generate_random() {
+	RandomSeed = (LCG_a * RandomSeed + LCG_c) % LCG_M;
+	return float(RandomSeed) / LCG_M; // Normalize to [0, 1)
+}
+
+
+// Helper function to convert minutes to hh:mm:ss format
+std::string convert_minutes_to_hhmmss(double minutes) {
+	int total_seconds = static_cast<int>(minutes * 60); // Convert minutes to total seconds
+	int hours = total_seconds / 3600;                   // Extract hours
+	int remaining_seconds = total_seconds % 3600;       // Remaining seconds after hours
+	int mins = remaining_seconds / 60;                  // Extract minutes
+	int secs = remaining_seconds % 60;                  // Extract seconds
+
+	// Format as hh:mm:ss
+	std::ostringstream oss;
+	oss << std::setw(2) << std::setfill('0') << hours << ":"
+		<< std::setw(2) << std::setfill('0') << mins << ":"
+		<< std::setw(2) << std::setfill('0') << secs;
+
+	return oss.str();
+}
+
+//void OutputVehicleDetails(const std::string& filename)
+//{
+//	std::ofstream outputFile(filename);  // Open the file for writing
+//
+//	if (linkIndices.size() == 0)
+//		return;
+//	// Write the CSV header in lowercase
+//	outputFile << "agent_id,departure_time,departure_time_hhmmss,mode,route_id,o_zone_id,d_zone_id,unique_route_id,node_ids,link_ids,total_distance_mile,total_distance_km,total_free_flow_travel_time,total_travel_time,route_key,route_volume,\n";
+//
+//	long agent_id = 1; 
+//
+//	for (int m = 1; m < linkIndices.size(); ++m)
+//	{
+//		for (int Orig = 1; Orig < linkIndices[m].size(); ++Orig)
+//		{
+//			for (int Dest = 1; Dest < linkIndices[m][Orig].size(); ++Dest)
+//			{
+//				std::unordered_map<std::string, bool> uniqueRoutes;
+//				int unique_route_id = 1;
+//				for (int route_id = 0; route_id < linkIndices[m][Orig][Dest].size(); ++route_id)
+//				{
+//					if (!linkIndices[m][Orig][Dest][route_id].empty())
+//					{
+//
+//						//for (int route_id_2 = 0; route_id_2 < route_id; ++route_id_2)
+//						//{  // mimic the route swiching machanisum, from route_id_2 to route_id, using the step size 
+//						//}
+//
+//						double totalDistance = 0.0;
+//						double totalFreeFlowTravelTime = 0.0;
+//						double totalTravelTime = 0.0;
+//						std::string nodeIDsStr;
+//						std::string linkIDsStr;
+//
+//						int nodeSum = 0;  // Sum of node IDs
+//						int linkSum = 0;  // Sum of link IDs
+//
+//						// Collect node IDs, link indices, compute total distance, travel times, and calculate sums
+//						for (int i = linkIndices[m][Orig][Dest][route_id].size() - 1; i >= 0; --i)
+//						{
+//							int k = linkIndices[m][Orig][Dest][route_id][i];
+//
+//							// Append the from_node_id for each link and calculate the node sum
+//							int fromNodeID = Link[k].external_from_node_id;
+//							nodeIDsStr += std::to_string(fromNodeID) + ";";
+//							nodeSum += fromNodeID;
+//
+//							// Append the link index (link ID) to the string and calculate the link sum
+//							linkIDsStr += std::to_string(k) + ";";
+//							linkSum += k;
+//
+//							// Sum up the total distance and travel times
+//							totalDistance += Link[k].length;
+//							totalFreeFlowTravelTime += Link[k].FreeTravelTime;
+//							totalTravelTime += Link[k].Travel_time;
+//
+//							// For the last link, also add the to_node_id
+//							if (i == 0)
+//							{
+//								int toNodeID = Link[k].external_to_node_id;
+//								nodeIDsStr += std::to_string(toNodeID);
+//								nodeSum += toNodeID;
+//							}
+//						}
+//
+//						// Create a unique key based on the node sum and link sum
+//						std::string routeKey = std::to_string(nodeSum) + "_" + std::to_string(linkSum);
+//
+//						// Check if this route (based on node and link sums) is already output
+//						if (uniqueRoutes.find(routeKey) == uniqueRoutes.end())
+//						{
+//							// This is a unique route, store it in the hash table
+//							uniqueRoutes[routeKey] = true;
+//
+//
+//							unique_route_id++;
+//						}
+//						//else
+//						//{
+//						//    // Duplicate path found, skipping output
+//						//    //std::cout << "Duplicate route skipped for Origin: " << Orig << ", Destination: " << Dest << "\n";
+//						//}
+//					}
+//				}
+//
+//
+//
+//				///////////////////////////////////// print out 
+//				uniqueRoutes.clear();
+//				int unique_route_id_size = unique_route_id;
+//				unique_route_id = 1;
+//
+//				for (int route_id = 0; route_id < linkIndices[m][Orig][Dest].size(); ++route_id)
+//				{
+//
+//					std::vector<double> linkTravelTimes; // Store travel times for each link
+//
+//					if (!linkIndices[m][Orig][Dest][route_id].empty())
+//					{
+//						double totalDistance = 0.0;
+//						double totalFreeFlowTravelTime = 0.0;
+//						double totalTravelTime = 0.0;
+//						std::string nodeIDsStr;
+//						std::string linkIDsStr;
+//
+//						int nodeSum = 0;  // Sum of node IDs
+//						int linkSum = 0;  // Sum of link IDs
+//
+//						// Collect node IDs, link indices, compute total distance, travel times, and calculate sums
+//						for (int i = linkIndices[m][Orig][Dest][route_id].size() - 1; i >= 0; --i)
+//						{
+//							int k = linkIndices[m][Orig][Dest][route_id][i];
+//
+//							// Append the from_node_id for each link and calculate the node sum
+//							int fromNodeID = Link[k].external_from_node_id;
+//							nodeIDsStr += std::to_string(fromNodeID) + ";";
+//							nodeSum += fromNodeID;
+//
+//							// Append the link index (link ID) to the string and calculate the link sum
+//							linkIDsStr += std::to_string(k) + ";";
+//							linkSum += k;
+//
+//							// Sum up the total distance and travel times
+//							totalDistance += Link[k].length;
+//							totalFreeFlowTravelTime += Link[k].FreeTravelTime;
+//							totalTravelTime += Link[k].Travel_time;
+//
+//							// Record the travel time for this link
+//							linkTravelTimes.push_back(Link[k].Travel_time);
+//
+//							// For the last link, also add the to_node_id
+//							if (i == 0)
+//							{
+//								int toNodeID = Link[k].external_to_node_id;
+//								nodeIDsStr += std::to_string(toNodeID);
+//								nodeSum += toNodeID;
+//							}
+//						}
+//
+//						// Create a unique key based on the node sum and link sum
+//						std::string routeKey = std::to_string(nodeSum) + "_" + std::to_string(linkSum);
+//
+//						// Check if this route (based on node and link sums) is already output
+//						if (uniqueRoutes.find(routeKey) == uniqueRoutes.end())
+//						{
+//							// This is a unique route, store it in the hash table
+//							uniqueRoutes[routeKey] = true;
+//
+//							// Remove trailing space from the link IDs string
+//							if (!linkIDsStr.empty())
+//								linkIDsStr.pop_back();
+//
+//							float od_volume = MDODflow[m][Orig][Dest];
+//							float route_volume = od_volume / unique_route_id_size;
+//
+//							int integer_volume = static_cast<int>(route_volume);
+//							float residual = route_volume - integer_volume;
+//
+//							// Add residual probability
+//							if (generate_random() < residual) {
+//								++integer_volume;
+//							}
+//							int total_time_window_min = (demand_period_ending_hours - demand_period_starting_hours) * 60;
+//
+//							float departure_time = demand_period_starting_hours * 60;
+//
+//						
+//							if (integer_volume > 0) 
+//							{
+//								
+//
+//								float route_time_increment = static_cast<float>(total_time_window_min) / integer_volume;
+//
+//
+//									for (int v = 0; v < integer_volume; ++v)
+//									{
+//										float time_increment_in_min = route_time_increment;
+//										if (integer_volume > 10)
+//										{
+//											departure_time = demand_period_starting_hours*60 + v*route_time_increment;
+//											time_increment_in_min = route_time_increment;
+//										}
+//										else
+//										{
+//											departure_time = demand_period_starting_hours*60 + agent_id % total_time_window_min ;
+//											time_increment_in_min = 1;
+//										}
+//
+//										std::vector<double> nodeArrivalTimes; // Store arrival times for each node
+//										double cumulativeTime = departure_time;
+//										// Calculate arrival times for each node
+//										for (double travelTime : linkTravelTimes) {
+//											cumulativeTime += travelTime;
+//											nodeArrivalTimes.push_back(cumulativeTime);
+//										}
+//
+//										std::string linkTravelTimeSeqStr;
+//										// Convert arrival times to a semicolon-separated string
+//										timeSequenceStr.clear();
+//										for (double time : nodeArrivalTimes) {
+//											timeSequenceStr += convert_minutes_to_hhmmss(time) + ";";
+//										}
+//										if (!timeSequenceStr.empty()) timeSequenceStr.pop_back();
+//
+//										//departure_time += std::rand() * time_increment_in_min;
+//
+//										std::string departure_time_hhmmss = convert_minutes_to_hhmmss(departure_time);
+//
+//										// Write the data for this OD pair and route to the CSV file
+//										outputFile << agent_id << "," << departure_time << "," 
+//											<< departure_time_hhmmss << ","
+//											<< g_mode_type_vector[m].mode_type.c_str() << ","
+//											<< route_id << "," << Orig << "," << Dest << "," << unique_route_id << ","
+//											<< nodeIDsStr << "," << linkIDsStr << ","
+//											<< totalDistance << "," << totalDistance * 1.609 << "," << totalFreeFlowTravelTime << ","
+//											<< totalTravelTime << "," << routeKey.c_str() << "," << route_volume << "\n";
+//
+//										agent_id++;
+//									}
+//								
+//									unique_route_id++;
+//							}
+//								//else
+//								//{
+//								//    // Duplicate path found, skipping output
+//								//    //std::cout << "Duplicate route skipped for Origin: " << Orig << ", Destination: " << Dest << "\n";
+//								//}
+//							}
+//						}
+//
+//					}
+//				}
+//			}
+//		}
+//
+//	// Close the file after writing
+//	outputFile.close();
+//
+//
+//	std::cout << "Output written to " << filename << std::endl;
+//
+//}
 
 void OutputODPerformance(const std::string& filename)
 {
@@ -1184,6 +1461,12 @@ void read_mode_type_file()
 			number_of_modes += 1;
 			if (number_of_modes < MAX_MODE_TYPES)
 			{
+				g_mode_type_vector[number_of_modes].mode_type = "auto";
+				g_mode_type_vector[number_of_modes].vot = 10;
+				g_mode_type_vector[number_of_modes].pce = 1;
+				g_mode_type_vector[number_of_modes].occ = 1; 
+				g_mode_type_vector[number_of_modes].demand_file = "demand.csv";
+
 				parser_mode_type.GetValueByFieldName("mode_type", g_mode_type_vector[number_of_modes].mode_type);
 				parser_mode_type.GetValueByFieldName("vot", g_mode_type_vector[number_of_modes].vot);
 				parser_mode_type.GetValueByFieldName("pce", g_mode_type_vector[number_of_modes].pce);
@@ -1270,7 +1553,7 @@ int main(int argc, char** argv)
 	no_nodes = get_number_of_nodes_from_node_file(no_zones, FirstThruNode);
 	number_of_links = get_number_of_links_from_link_file();
 
-	printf("no_nodes= %d, no_zones = %d, FirstThruNode (seq No) = %d, number_of_links = %d\n", no_nodes, no_zones,
+	printf("# of nodes= %d, largest zone id = %d, First Through Node (Seq No) = %d, number of links = %d\n", no_nodes, no_zones,
 		FirstThruNode, number_of_links);
 
 	fprintf(summary_log_file, "no_nodes= %d, no_zones = %d, FirstThruNode (seq No) = %d, number_of_links = %d\n", no_nodes, no_zones,
@@ -1590,6 +1873,7 @@ int main(int argc, char** argv)
 	if (shortest_path_log_flag)
 	{
 		OutputRouteDetails("route_assignment.csv");
+		//OutputVehicleDetails("vehicle.csv");
 	}
 	free(MainVolume);
 	free(SubVolume);
@@ -1978,9 +2262,31 @@ int Read_ODtable(double*** ODtable, double*** DiffODtable, int no_zones)
 		{
 			if (g_mode_type_vector[m].demand_file.length() > 0)
 			{
-			printf("Failed to open demand file %s\n", g_mode_type_vector[m].demand_file.c_str());
+
+				printf("Failed to open demand file %s\n", g_mode_type_vector[m].demand_file.c_str());
+
+				if (number_of_modes == 1)
+				{
+					for (int o = 1; o <= no_zones; o++)
+						for (int d = 1; d <= no_zones; d++)
+						{
+
+							if (g_map_external_node_id_2_node_seq_no.find(o) != g_map_external_node_id_2_node_seq_no.end()
+								&& g_map_external_node_id_2_node_seq_no.find(d) != g_map_external_node_id_2_node_seq_no.end())
+							{
+
+								ODtable[m][o][d] = 1.0;
+								DiffODtable[m][o][d] = 1.0; // by default in case there is no baseline demand being specified 
+							}
+						}
+				}
 			}
-			return 0;
+
+
+
+
+
+				return 0;
 		}
 
 		int o_zone_id, d_zone_id;
