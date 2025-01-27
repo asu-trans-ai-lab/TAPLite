@@ -33,10 +33,10 @@
 #include <algorithm>
 #include <omp.h>
 #include <chrono>  // for high_resolution_clock
-
+#include <deque>
 #include <iomanip> // For std::setw and std::setfill
 
-
+using namespace std;
 #define MAX_MODE_TYPES  10
 
 //#ifndef _win32
@@ -57,6 +57,7 @@ struct link_record {
 	int external_to_node_id;
 
 	double Lane_Capacity;
+	double Lane_SaturationFlowRate; 
 	double Link_Capacity;
 	double lanes;
 	double FreeTravelTime;
@@ -93,6 +94,9 @@ struct link_record {
 	double Base_volume;
 	double Obs_volume;
 	std::string geometry;
+
+	int timing_arc_flag, cycle_length, start_green_time, end_green_time;
+
 	link_record()
 	{
 		link_type = 1;
@@ -112,6 +116,12 @@ struct link_record {
 		Ref_volume = 0;
 		Base_volume = 0;
 		Obs_volume = -1;
+		Lane_SaturationFlowRate = 1800; 
+
+		timing_arc_flag = 0;
+		cycle_length = 60;
+		start_green_time = 0;
+		end_green_time = 30; 
 	}
 	void setup(int num_of_modes)
 	{
@@ -246,6 +256,18 @@ FILE* link_performance_file;
 
 double Link_QueueVDF(int k, double Volume, double& IncomingDemand, double& DOC, double& P, double& t0, double& t2, double& t3, double& vt2, double& Q_mu, double& Q_gamma, double& congestion_ref_speed,
 	double& avg_queue_speed, double& avg_QVDF_period_speed, double& Severe_Congestion_P, double model_speed[300]);
+
+class Node {
+public:
+	int node_id;
+	double x, y; 
+	vector<int> m_incoming_link_seq_no_vector;
+	vector<int> m_outgoing_link_seq_no_vector;
+
+	Node() : node_id(-1) {}
+};
+
+vector<Node> g_node_vector;
 
 int Minpath(int mode, int Orig, int* PredLink, double* CostTo)
 {
@@ -732,7 +754,7 @@ void OutputRouteDetails(const std::string& filename)
 	if (linkIndices.size() == 0)
 		return; 
 	// Write the CSV header in lowercase
-	outputFile << "mode,route_id,o_zone_id,d_zone_id,unique_route_id,node_ids,link_ids,total_distance_mile,total_distance_km,total_free_flow_travel_time,total_travel_time,route_key,volume,\n";
+	outputFile << "mode,route_id,o_zone_id,d_zone_id,unique_route_id,node_ids,link_ids,distance_mile,total_distance_km,total_free_flow_travel_time,total_travel_time,route_key,volume,\n";
 
 
 
@@ -935,248 +957,282 @@ std::string convert_minutes_to_hhmmss(double minutes) {
 	return oss.str();
 }
 
-//void OutputVehicleDetails(const std::string& filename)
-//{
-//	std::ofstream outputFile(filename);  // Open the file for writing
-//
-//	if (linkIndices.size() == 0)
-//		return;
-//	// Write the CSV header in lowercase
-//	outputFile << "agent_id,departure_time,departure_time_hhmmss,mode,route_id,o_zone_id,d_zone_id,unique_route_id,node_ids,link_ids,total_distance_mile,total_distance_km,total_free_flow_travel_time,total_travel_time,route_key,route_volume,\n";
-//
-//	long agent_id = 1; 
-//
-//	for (int m = 1; m < linkIndices.size(); ++m)
-//	{
-//		for (int Orig = 1; Orig < linkIndices[m].size(); ++Orig)
-//		{
-//			for (int Dest = 1; Dest < linkIndices[m][Orig].size(); ++Dest)
-//			{
-//				std::unordered_map<std::string, bool> uniqueRoutes;
-//				int unique_route_id = 1;
-//				for (int route_id = 0; route_id < linkIndices[m][Orig][Dest].size(); ++route_id)
-//				{
-//					if (!linkIndices[m][Orig][Dest][route_id].empty())
-//					{
-//
-//						//for (int route_id_2 = 0; route_id_2 < route_id; ++route_id_2)
-//						//{  // mimic the route swiching machanisum, from route_id_2 to route_id, using the step size 
-//						//}
-//
-//						double totalDistance = 0.0;
-//						double totalFreeFlowTravelTime = 0.0;
-//						double totalTravelTime = 0.0;
-//						std::string nodeIDsStr;
-//						std::string linkIDsStr;
-//
-//						int nodeSum = 0;  // Sum of node IDs
-//						int linkSum = 0;  // Sum of link IDs
-//
-//						// Collect node IDs, link indices, compute total distance, travel times, and calculate sums
-//						for (int i = linkIndices[m][Orig][Dest][route_id].size() - 1; i >= 0; --i)
-//						{
-//							int k = linkIndices[m][Orig][Dest][route_id][i];
-//
-//							// Append the from_node_id for each link and calculate the node sum
-//							int fromNodeID = Link[k].external_from_node_id;
-//							nodeIDsStr += std::to_string(fromNodeID) + ";";
-//							nodeSum += fromNodeID;
-//
-//							// Append the link index (link ID) to the string and calculate the link sum
-//							linkIDsStr += std::to_string(k) + ";";
-//							linkSum += k;
-//
-//							// Sum up the total distance and travel times
-//							totalDistance += Link[k].length;
-//							totalFreeFlowTravelTime += Link[k].FreeTravelTime;
-//							totalTravelTime += Link[k].Travel_time;
-//
-//							// For the last link, also add the to_node_id
-//							if (i == 0)
-//							{
-//								int toNodeID = Link[k].external_to_node_id;
-//								nodeIDsStr += std::to_string(toNodeID);
-//								nodeSum += toNodeID;
-//							}
-//						}
-//
-//						// Create a unique key based on the node sum and link sum
-//						std::string routeKey = std::to_string(nodeSum) + "_" + std::to_string(linkSum);
-//
-//						// Check if this route (based on node and link sums) is already output
-//						if (uniqueRoutes.find(routeKey) == uniqueRoutes.end())
-//						{
-//							// This is a unique route, store it in the hash table
-//							uniqueRoutes[routeKey] = true;
-//
-//
-//							unique_route_id++;
-//						}
-//						//else
-//						//{
-//						//    // Duplicate path found, skipping output
-//						//    //std::cout << "Duplicate route skipped for Origin: " << Orig << ", Destination: " << Dest << "\n";
-//						//}
-//					}
-//				}
-//
-//
-//
-//				///////////////////////////////////// print out 
-//				uniqueRoutes.clear();
-//				int unique_route_id_size = unique_route_id;
-//				unique_route_id = 1;
-//
-//				for (int route_id = 0; route_id < linkIndices[m][Orig][Dest].size(); ++route_id)
-//				{
-//
-//					std::vector<double> linkTravelTimes; // Store travel times for each link
-//
-//					if (!linkIndices[m][Orig][Dest][route_id].empty())
-//					{
-//						double totalDistance = 0.0;
-//						double totalFreeFlowTravelTime = 0.0;
-//						double totalTravelTime = 0.0;
-//						std::string nodeIDsStr;
-//						std::string linkIDsStr;
-//
-//						int nodeSum = 0;  // Sum of node IDs
-//						int linkSum = 0;  // Sum of link IDs
-//
-//						// Collect node IDs, link indices, compute total distance, travel times, and calculate sums
-//						for (int i = linkIndices[m][Orig][Dest][route_id].size() - 1; i >= 0; --i)
-//						{
-//							int k = linkIndices[m][Orig][Dest][route_id][i];
-//
-//							// Append the from_node_id for each link and calculate the node sum
-//							int fromNodeID = Link[k].external_from_node_id;
-//							nodeIDsStr += std::to_string(fromNodeID) + ";";
-//							nodeSum += fromNodeID;
-//
-//							// Append the link index (link ID) to the string and calculate the link sum
-//							linkIDsStr += std::to_string(k) + ";";
-//							linkSum += k;
-//
-//							// Sum up the total distance and travel times
-//							totalDistance += Link[k].length;
-//							totalFreeFlowTravelTime += Link[k].FreeTravelTime;
-//							totalTravelTime += Link[k].Travel_time;
-//
-//							// Record the travel time for this link
-//							linkTravelTimes.push_back(Link[k].Travel_time);
-//
-//							// For the last link, also add the to_node_id
-//							if (i == 0)
-//							{
-//								int toNodeID = Link[k].external_to_node_id;
-//								nodeIDsStr += std::to_string(toNodeID);
-//								nodeSum += toNodeID;
-//							}
-//						}
-//
-//						// Create a unique key based on the node sum and link sum
-//						std::string routeKey = std::to_string(nodeSum) + "_" + std::to_string(linkSum);
-//
-//						// Check if this route (based on node and link sums) is already output
-//						if (uniqueRoutes.find(routeKey) == uniqueRoutes.end())
-//						{
-//							// This is a unique route, store it in the hash table
-//							uniqueRoutes[routeKey] = true;
-//
-//							// Remove trailing space from the link IDs string
-//							if (!linkIDsStr.empty())
-//								linkIDsStr.pop_back();
-//
-//							float od_volume = MDODflow[m][Orig][Dest];
-//							float route_volume = od_volume / unique_route_id_size;
-//
-//							int integer_volume = static_cast<int>(route_volume);
-//							float residual = route_volume - integer_volume;
-//
-//							// Add residual probability
-//							if (generate_random() < residual) {
-//								++integer_volume;
-//							}
-//							int total_time_window_min = (demand_period_ending_hours - demand_period_starting_hours) * 60;
-//
-//							float departure_time = demand_period_starting_hours * 60;
-//
-//						
-//							if (integer_volume > 0) 
-//							{
-//								
-//
-//								float route_time_increment = static_cast<float>(total_time_window_min) / integer_volume;
-//
-//
-//									for (int v = 0; v < integer_volume; ++v)
-//									{
-//										float time_increment_in_min = route_time_increment;
-//										if (integer_volume > 10)
-//										{
-//											departure_time = demand_period_starting_hours*60 + v*route_time_increment;
-//											time_increment_in_min = route_time_increment;
-//										}
-//										else
-//										{
-//											departure_time = demand_period_starting_hours*60 + agent_id % total_time_window_min ;
-//											time_increment_in_min = 1;
-//										}
-//
-//										std::vector<double> nodeArrivalTimes; // Store arrival times for each node
-//										double cumulativeTime = departure_time;
-//										// Calculate arrival times for each node
-//										for (double travelTime : linkTravelTimes) {
-//											cumulativeTime += travelTime;
-//											nodeArrivalTimes.push_back(cumulativeTime);
-//										}
-//
-//										std::string linkTravelTimeSeqStr;
-//										// Convert arrival times to a semicolon-separated string
-//										timeSequenceStr.clear();
-//										for (double time : nodeArrivalTimes) {
-//											timeSequenceStr += convert_minutes_to_hhmmss(time) + ";";
-//										}
-//										if (!timeSequenceStr.empty()) timeSequenceStr.pop_back();
-//
-//										//departure_time += std::rand() * time_increment_in_min;
-//
-//										std::string departure_time_hhmmss = convert_minutes_to_hhmmss(departure_time);
-//
-//										// Write the data for this OD pair and route to the CSV file
-//										outputFile << agent_id << "," << departure_time << "," 
-//											<< departure_time_hhmmss << ","
-//											<< g_mode_type_vector[m].mode_type.c_str() << ","
-//											<< route_id << "," << Orig << "," << Dest << "," << unique_route_id << ","
-//											<< nodeIDsStr << "," << linkIDsStr << ","
-//											<< totalDistance << "," << totalDistance * 1.609 << "," << totalFreeFlowTravelTime << ","
-//											<< totalTravelTime << "," << routeKey.c_str() << "," << route_volume << "\n";
-//
-//										agent_id++;
-//									}
-//								
-//									unique_route_id++;
-//							}
-//								//else
-//								//{
-//								//    // Duplicate path found, skipping output
-//								//    //std::cout << "Duplicate route skipped for Origin: " << Orig << ", Destination: " << Dest << "\n";
-//								//}
-//							}
-//						}
-//
-//					}
-//				}
-//			}
-//		}
-//
-//	// Close the file after writing
-//	outputFile.close();
-//
-//
-//	std::cout << "Output written to " << filename << std::endl;
-//
-//}
+
+// Additional functions (find_links_to, init_link_pointers, init_links) would follow
+// with similar C++ implementations...
+// Calculate departure time function
+std::vector<double> calculate_departure_time(double T0, double T1, double T3, double beta, int route_volume) {
+	std::vector<double> departure_times;
+	double time_span = T3 - T0;
+
+	for (int i = 0; i < route_volume; i++) {
+		double normalized_time = static_cast<double>(i) / route_volume;
+		double time = T0 + (beta * pow(normalized_time, 2) + normalized_time) * time_span;
+		departure_times.push_back(time);
+	}
+
+	return departure_times;
+}
+void OutputVehicleDetails(const std::string& filename)
+{
+	// Record the start time
+	auto start = std::chrono::high_resolution_clock::now();
+
+	std::ofstream outputFile(filename);  // Open the file for writing
+
+	if (linkIndices.size() == 0)
+		return;
+	// Write the CSV header in lowercase
+	outputFile << "agent_id,departure_time,departure_time_hhmmss,mode,route_id,o_zone_id,d_zone_id,unique_route_id,node_ids,link_ids,total_distance_mile,total_distance_km,total_free_flow_travel_time,total_travel_time,route_key,route_volume,\n";
+
+	long agent_id = 1; 
+
+	for (int m = 1; m < linkIndices.size(); ++m)
+	{
+		for (int Orig = 1; Orig < linkIndices[m].size(); ++Orig)
+		{
+			for (int Dest = 1; Dest < linkIndices[m][Orig].size(); ++Dest)
+			{
+				std::unordered_map<std::string, bool> uniqueRoutes;
+				int unique_route_id = 1;
+				for (int route_id = 0; route_id < linkIndices[m][Orig][Dest].size(); ++route_id)
+				{
+					if (!linkIndices[m][Orig][Dest][route_id].empty())
+					{
+
+						//for (int route_id_2 = 0; route_id_2 < route_id; ++route_id_2)
+						//{  // mimic the route swiching machanisum, from route_id_2 to route_id, using the step size 
+						//}
+
+						double totalDistance = 0.0;
+						double totalFreeFlowTravelTime = 0.0;
+						double totalTravelTime = 0.0;
+						std::string nodeIDsStr;
+						std::string linkIDsStr;
+
+						int nodeSum = 0;  // Sum of node IDs
+						int linkSum = 0;  // Sum of link IDs
+
+						// Collect node IDs, link indices, compute total distance, travel times, and calculate sums
+						for (int i = linkIndices[m][Orig][Dest][route_id].size() - 1; i >= 0; --i)
+						{
+							int k = linkIndices[m][Orig][Dest][route_id][i];
+
+							// Append the from_node_id for each link and calculate the node sum
+							int fromNodeID = Link[k].external_from_node_id;
+							nodeIDsStr += std::to_string(fromNodeID) + ";";
+							nodeSum += fromNodeID;
+
+							// Append the link index (link ID) to the string and calculate the link sum
+							linkIDsStr += std::to_string(k) + ";";
+							linkSum += k;
+
+							// Sum up the total distance and travel times
+							totalDistance += Link[k].length;
+							totalFreeFlowTravelTime += Link[k].FreeTravelTime;
+							totalTravelTime += Link[k].Travel_time;
+
+							// For the last link, also add the to_node_id
+							if (i == 0)
+							{
+								int toNodeID = Link[k].external_to_node_id;
+								nodeIDsStr += std::to_string(toNodeID);
+								nodeSum += toNodeID;
+							}
+						}
+
+						// Create a unique key based on the node sum and link sum
+						std::string routeKey = std::to_string(nodeSum) + "_" + std::to_string(linkSum);
+
+						// Check if this route (based on node and link sums) is already output
+						if (uniqueRoutes.find(routeKey) == uniqueRoutes.end())
+						{
+							// This is a unique route, store it in the hash table
+							uniqueRoutes[routeKey] = true;
+
+
+							unique_route_id++;
+						}
+						//else
+						//{
+						//    // Duplicate path found, skipping output
+						//    //std::cout << "Duplicate route skipped for Origin: " << Orig << ", Destination: " << Dest << "\n";
+						//}
+					}
+				}
+
+
+
+				///////////////////////////////////// print out 
+				uniqueRoutes.clear();
+				int unique_route_id_size = unique_route_id;
+				unique_route_id = 1;
+
+				for (int route_id = 0; route_id < linkIndices[m][Orig][Dest].size(); ++route_id)
+				{
+
+					std::vector<double> linkTravelTimes; // Store travel times for each link
+
+					if (!linkIndices[m][Orig][Dest][route_id].empty())
+					{
+						double totalDistance = 0.0;
+						double totalFreeFlowTravelTime = 0.0;
+						double totalTravelTime = 0.0;
+						std::string nodeIDsStr;
+						std::string linkIDsStr;
+
+						int nodeSum = 0;  // Sum of node IDs
+						int linkSum = 0;  // Sum of link IDs
+
+						// Collect node IDs, link indices, compute total distance, travel times, and calculate sums
+						for (int i = linkIndices[m][Orig][Dest][route_id].size() - 1; i >= 0; --i)
+						{
+							int k = linkIndices[m][Orig][Dest][route_id][i];
+
+							// Append the from_node_id for each link and calculate the node sum
+							int fromNodeID = Link[k].external_from_node_id;
+							nodeIDsStr += std::to_string(fromNodeID) + ";";
+							nodeSum += fromNodeID;
+
+							// Append the link index (link ID) to the string and calculate the link sum
+							linkIDsStr += std::to_string(k) + ";";
+							linkSum += k;
+
+							// Sum up the total distance and travel times
+							totalDistance += Link[k].length;
+							totalFreeFlowTravelTime += Link[k].FreeTravelTime;
+							totalTravelTime += Link[k].Travel_time;
+
+							// Record the travel time for this link
+							linkTravelTimes.push_back(Link[k].Travel_time);
+
+							// For the last link, also add the to_node_id
+							if (i == 0)
+							{
+								int toNodeID = Link[k].external_to_node_id;
+								nodeIDsStr += std::to_string(toNodeID);
+								nodeSum += toNodeID;
+							}
+						}
+
+						// Create a unique key based on the node sum and link sum
+						std::string routeKey = std::to_string(nodeSum) + "_" + std::to_string(linkSum);
+
+						// Check if this route (based on node and link sums) is already output
+						if (uniqueRoutes.find(routeKey) == uniqueRoutes.end())
+						{
+							// This is a unique route, store it in the hash table
+							uniqueRoutes[routeKey] = true;
+
+							// Remove trailing space from the link IDs string
+							if (!linkIDsStr.empty())
+								linkIDsStr.pop_back();
+
+							float od_volume = MDODflow[m][Orig][Dest];
+							float route_volume = od_volume / unique_route_id_size;
+
+							int integer_volume = static_cast<int>(route_volume);
+							float residual = route_volume - integer_volume;
+
+							// Add residual probability
+							if (generate_random() < residual) {
+								++integer_volume;
+							}
+							int total_time_window_min = (demand_period_ending_hours - demand_period_starting_hours) * 60;
+
+							float departure_time = demand_period_starting_hours * 60;
+
+						
+							if (integer_volume > 0) 
+							{
+								
+
+								float route_time_increment = static_cast<float>(total_time_window_min) / integer_volume;
+
+
+									for (int v = 0; v < integer_volume; ++v)
+									{
+										float time_increment_in_min = route_time_increment;
+										if (integer_volume > 10)
+										{
+											departure_time = demand_period_starting_hours*60 + v*route_time_increment;
+											time_increment_in_min = route_time_increment;
+										}
+										else
+										{
+											departure_time = demand_period_starting_hours*60 + agent_id % total_time_window_min ;
+											time_increment_in_min = 1;
+										}
+
+										std::vector<double> nodeArrivalTimes; // Store arrival times for each node
+										double cumulativeTime = departure_time;
+										// Calculate arrival times for each node
+										for (double travelTime : linkTravelTimes) {
+											cumulativeTime += travelTime;
+											nodeArrivalTimes.push_back(cumulativeTime);
+										}
+
+										std::string timeSequenceStr;
+										// Convert arrival times to a semicolon-separated string
+										timeSequenceStr.clear();
+										for (double time : nodeArrivalTimes) {
+											timeSequenceStr += convert_minutes_to_hhmmss(time) + ";";
+										}
+										if (!timeSequenceStr.empty()) timeSequenceStr.pop_back();
+
+										//departure_time += std::rand() * time_increment_in_min;
+
+										std::string departure_time_hhmmss = convert_minutes_to_hhmmss(departure_time);
+
+										// Write the data for this OD pair and route to the CSV file
+										outputFile << agent_id << "," << departure_time << "," 
+											<< departure_time_hhmmss << ","
+											<< g_mode_type_vector[m].mode_type.c_str() << ","
+											<< route_id << "," << Orig << "," << Dest << "," << unique_route_id << ","
+											<< nodeIDsStr << "," << linkIDsStr << ","
+											<< totalDistance << "," << totalDistance * 1.609 << "," << totalFreeFlowTravelTime << ","
+											<< totalTravelTime << "," << routeKey.c_str() << "," << route_volume << "\n";
+
+										agent_id++;
+									}
+								
+									unique_route_id++;
+							}
+								//else
+								//{
+								//    // Duplicate path found, skipping output
+								//    //std::cout << "Duplicate route skipped for Origin: " << Orig << ", Destination: " << Dest << "\n";
+								//}
+							}
+						}
+
+					}
+				}
+			}
+		}
+
+	// Close the file after writing
+	outputFile.close();
+
+
+	std::cout << "Output written to " << filename << std::endl;
+	// Record the end time
+	auto end = std::chrono::high_resolution_clock::now();
+
+	// Calculate the duration in milliseconds
+
+	// Calculate the duration in seconds
+	auto duration = end - start;
+
+	// Convert to hours, minutes, seconds
+	auto hours = std::chrono::duration_cast<std::chrono::hours>(duration);
+	auto minutes = std::chrono::duration_cast<std::chrono::minutes>(duration % std::chrono::hours(1));
+	auto seconds = std::chrono::duration_cast<std::chrono::seconds>(duration % std::chrono::minutes(1));
+	auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(duration % std::chrono::seconds(1));
+
+	printf("CPU file writing time: %lld hours %lld minutes %lld seconds %lld ms\n",
+		hours.count(), minutes.count(), seconds.count(), milliseconds.count());
+}
 
 void OutputODPerformance(const std::string& filename)
 {
@@ -1342,7 +1398,28 @@ int get_number_of_nodes_from_node_file(int& number_of_zones, int& l_FirstThruNod
 		parser_node.CloseCSVFile();
 	}
 
+	g_node_vector.resize(number_of_nodes + 1);
 
+	if (parser_node.OpenCSVFile("node.csv", true))
+	{
+		while (parser_node.ReadRecord())  // if this line contains [] mark, then we will also read
+			// field headers.
+		{
+			// Read node id
+			int node_id = 0;
+			parser_node.GetValueByFieldName("node_id", node_id);
+
+
+			int internal_node_id = g_map_external_node_id_2_node_seq_no[node_id];
+			double x_coord, y_coord;
+			parser_node.GetValueByFieldName("x_coord", x_coord);
+			parser_node.GetValueByFieldName("y_coord", y_coord);
+			g_node_vector[internal_node_id].x = x_coord;
+			g_node_vector[internal_node_id].y = y_coord;
+		}
+
+		parser_node.CloseCSVFile();
+	}
 
 	return number_of_nodes;
 }
@@ -1438,9 +1515,9 @@ void createModeTypeFile(const std::string& fileName) {
 	file << "mode_type,name,vot,pce,occ,demand_file,dedicated_shortest_path,\n";
 
 	// Writing the sample data (from your provided file)
-	file << "sov,DRIVE, 10, 1, 1,demand_1400_1800_sov.csv, 1\n";
-	file << "hov,HOV, 10, 1, 2,demand_1400_1800_hov.csv, 1\n";
-	file << "trk,truck, 10, 2, 1,demand_1400_1800_trk.csv, 0\n";
+	file << "sov,DRIVE, 10, 1, 1,demand.csv, 1\n";
+	file << "hov,HOV, 10, 1, 2,demand_hov.csv, 1\n";
+	file << "trk,truck, 10, 2, 1,demand_trk.csv, 0\n";
 
 	std::cout << "sample_mode_type.csv file created successfully!" << std::endl;
 }
@@ -1539,7 +1616,7 @@ void InitializeLinkIndices(int num_modes, int no_zones, int max_routes)
 	printf("Memmory creation time for 5D link path matrix: %lld hours %lld minutes %lld seconds %lld ms\n", hours.count(), minutes.count(), seconds.count(), milliseconds.count());
 }
 
-int main(int argc, char** argv)
+int AssignmentAPI()
 {
 
 	fopen_s(&summary_log_file, "summary_log_file.txt", "w");
@@ -1873,7 +1950,7 @@ int main(int argc, char** argv)
 	if (shortest_path_log_flag)
 	{
 		OutputRouteDetails("route_assignment.csv");
-		//OutputVehicleDetails("vehicle.csv");
+		OutputVehicleDetails("vehicle.csv");
 	}
 	free(MainVolume);
 	free(SubVolume);
@@ -1939,6 +2016,7 @@ static void CloseODflow(void)
 
 void ReadLinks()
 {
+
 	CDTACSVParser parser_link;
 	std::vector<CLink> links;
 
@@ -1979,6 +2057,8 @@ void ReadLinks()
 			parser_link.GetValueByFieldName("from_node_id", Link[k].external_from_node_id);
 			parser_link.GetValueByFieldName("to_node_id", Link[k].external_to_node_id);
 			parser_link.GetValueByFieldName("link_id", Link[k].link_id);
+
+			Link[k].link_id = k; // rewrite using internal link id
 			parser_link.GetValueByFieldName("link_type", Link[k].link_type);
 
 
@@ -2015,6 +2095,8 @@ void ReadLinks()
 				continue;
 			}
 
+			g_node_vector[Link[k].internal_to_node_id].m_incoming_link_seq_no_vector.push_back(k);
+			g_node_vector[Link[k].internal_from_node_id].m_outgoing_link_seq_no_vector.push_back(k);
 
 			parser_link.GetValueByFieldName("length", Link[k].length);
 
@@ -2831,9 +2913,12 @@ int Read_ODflow(double* TotalODflow, int* number_of_modes, int* no_zones)
 		}
 		total_zone_demand += TotalOFlow[z];
 	}
+
+	if(total_infeasible_outbound_zones)
+	{
 	printf("Error: %d zones have no outbound link with positive demand %f, = %f percentage of total demand\n", total_infeasible_outbound_zones,
 		total_infeasible_outbound_zone_demand, total_infeasible_outbound_zone_demand*100/fmax(0.01, total_zone_demand));
-
+	}
 
 	*TotalODflow = (double)RealTotal;
 
@@ -2922,106 +3007,834 @@ double LinksSDLineSearch(double* MainVolume, double* SDVolume) {
 	return lambdaleft;
 }
 
-#include <iostream>
-#include <vector>
-#include <queue>
-#include <unordered_map>
-
-using namespace std;
-
-// Define constants and structures
-const int T = 100; // Total simulation time
-const int MAX_LINKS = 100; // Maximum number of links
-
-struct Vehicle {
-	int id;
-	vector<int> path; // Sequence of links
-	int currentLink;
-	int TA; // Arrival time at the current link
-	int TD; // Departure time from the current link
-	int passengers; // Number of passengers in the vehicle
-	int capacity; // Maximum passenger capacity
+/// <summary>
+///  below is simulation codes
+/// </summary>
+/// 
+/// 
+/// 
+/// 
+// Add at the beginning of your code
+enum LogLevel {
+	LOG_ERROR = 0,    // Critical errors
+	LOG_WARN = 1,     // Warnings
+	LOG_INFO = 2,     // Important simulation events
+	LOG_DEBUG = 3,    // Detailed debugging info
+	LOG_TRACE = 4     // Most detailed level
 };
 
-struct Link {
-	int id;
-	int FFTT; // Free-flow travel time
-	double capacity; // Current available capacity
-	queue<int> waitingQueue; // Vehicles waiting to enter the link
-	vector<int> A; // Cumulative arrival counts
-	vector<int> D; // Cumulative departure counts
+class SimulationLogger {
+private:
+	ofstream debug_file;
+	ofstream info_file;
+	ofstream error_file;
+	LogLevel current_level;
+
+	static const char* getLevelString(LogLevel level) {
+		switch (level) {
+		case LOG_ERROR: return "ERROR";
+		case LOG_WARN:  return "WARN";
+		case LOG_INFO:  return "INFO";
+		case LOG_DEBUG: return "DEBUG";
+		case LOG_TRACE: return "TRACE";
+		default: return "UNKNOWN";
+		}
+	}
+
+public:
+	SimulationLogger(LogLevel level = LOG_INFO) : current_level(level) {
+		debug_file.open("sim_debug.csv");
+		info_file.open("sim_info.csv");
+		error_file.open("sim_error.log");
+
+		// Write headers
+		debug_file << "timestamp,level,event,agent_id,link_id,node_id,details\n";
+		info_file << "timestamp,level,event,count,details\n";
+	}
+
+	void log(LogLevel level, const string& event, int agent_id, int link_id, int node_id, const string& details) {
+		if (level > current_level) return;
+
+		string timestamp = to_string(time(nullptr));
+
+		// Always log errors to error file
+		if (level == LOG_ERROR) {
+			error_file << timestamp << " [ERROR] " << event << " Agent:" << agent_id
+				<< " Link:" << link_id << " Node:" << node_id << " - " << details << endl;
+		}
+
+		// Detailed debugging info
+		if (level <= LOG_DEBUG) {
+			debug_file << timestamp << "," << getLevelString(level) << "," << event << ","
+				<< agent_id << "," << link_id << "," << node_id << "," << details << endl;
+		}
+
+		// Summary information
+		if (level <= LOG_INFO) {
+			info_file << timestamp << "," << getLevelString(level) << "," << event << ","
+				<< "," << details << endl;
+		}
+	}
+
+	void logAgentMovement(int t, int agent_id, int from_link, int to_link, const string& status) {
+		if (LOG_TRACE <= current_level) {
+			debug_file << t << ",TRACE,MOVE," << agent_id << "," << from_link << "->"
+				<< to_link << "," << status << endl;
+		}
+	}
+
+	void logQueueStatus(int t, int link_id, int entrance_size, int exit_size) {
+		if (LOG_DEBUG <= current_level) {
+			debug_file << t << ",DEBUG,QUEUE," << link_id << "," << entrance_size
+				<< "," << exit_size << endl;
+		}
+	}
+
+	void logSimulationStatus(int t, int loaded, int transfers, int completed) {
+		if (LOG_INFO <= current_level) {
+			info_file << t << ",INFO,STATUS," << loaded << "," << transfers
+				<< "," << completed << endl;
+		}
+	}
+
+	~SimulationLogger() {
+		debug_file.close();
+		info_file.close();
+		error_file.close();
+	}
 };
 
-// Function to simulate traffic
-//void simulateTraffic(vector<Vehicle>& vehicles, vector<Link>& links, int totalTime) {
-//	for (int t = 0; t < totalTime; ++t) { // Time loop
-//		for (auto& link : links) { // Link loop
-//			// Update link capacity based on arrivals and departures
-//			if (t > 0) {
-//				link.capacity -= (link.A[t - 1] - link.D[t - 1]);
-//			}
+//// Add to ParallelQueueSimulator class:
+//SimulationLogger logger;
 //
-//			for (auto& vehicle : vehicles) { // Vehicle loop
-//				if (vehicle.currentLink == link.id && vehicle.TD == t) {
-//					// Check if vehicle can move
-//					if (link.capacity >= 1.0) {
-//						// Move vehicle to the next link in its path
-//						if (vehicle.currentLink + 1 < vehicle.path.size()) {
-//							int nextLinkId = vehicle.path[vehicle.currentLink + 1];
-//							auto& nextLink = links[nextLinkId];
-//
-//							vehicle.TA = t;
-//							vehicle.TD = t + nextLink.FFTT;
-//
-//							// Update link capacities
-//							link.capacity -= 1.0; // Assuming 1 PCE for simplicity
-//							nextLink.capacity -= 1.0;
-//
-//							// Update cumulative flow counts
-//							link.D[t]++;
-//							nextLink.A[t]++;
-//
-//							// Update vehicle state
-//							vehicle.currentLink++;
-//						}
-//					}
-//					else {
-//						// Vehicle waits if no capacity is available
-//						vehicle.TD = t + 1;
-//					}
-//				}
-//			}
-//		}
-//	}
-//}
+//// Then in your simulation methods, add logging:
+//logger.logEvent(t, "agent_load", agent->agent_uid, l,
+//	link.entrance_queue.size(), "Agent loaded to link");
+class CAgent_Simu {
+public:
+	int agent_uid;
+	int o_zone_id, d_zone_id;
+	double distannce; 
+	double travel_time; 
+	int agent_seq_no; 
+	double departure_time_in_min;
+	int departure_time_in_simu_interval; 
+	vector<int> path_link_sequence;
+	int current_link_seq_no; 
+	bool loaded;
+	double desired_free_travel_time_ratio;
 
-//int Simu_main() {
-//	// Create sample vehicles
-//	vector<Vehicle> vehicles = {
-//		{0, {0, 1, 2}, 0, 0, 0, 4, 4}, // id, path, currentLink, TA, TD, passengers, capacity
-//		{1, {1, 2, 3}, 0, 0, 0, 3, 4}
-//	};
-//
-//	// Create sample links
-//	vector<Link> links(MAX_LINKS);
-//	for (int i = 0; i < MAX_LINKS; ++i) {
-//		links[i] = { i, 5, 10.0, queue<int>(), vector<int>(T, 0), vector<int>(T, 0) };
-//	}
-//
-//	// Run the simulation
-//	simulateTraffic(vehicles, links, T);
-//
-//	// Print results
-//	for (const auto& link : links) {
-//		cout << "Link " << link.id << ": " << endl;
-//		cout << "Arrival Counts: ";
-//		for (int t = 0; t < T; ++t) cout << link.A[t] << " ";
-//		cout << endl;
-//
-//		cout << "Departure Counts: ";
-//		for (int t = 0; t < T; ++t) cout << link.D[t] << " ";
-//		cout << endl;
-//	}
-//
-//	return 0;
-//}
+	vector<double> link_arrival_times;  // in simu time interval
+	vector<double> link_departure_times; // in simu time interval
+
+	CAgent_Simu() :
+		agent_uid(-1),
+		agent_seq_no (-1),
+		distannce (0),
+		travel_time(0),
+		departure_time_in_min(0),
+		departure_time_in_simu_interval (0),
+		current_link_seq_no(0),
+		loaded(false),
+		desired_free_travel_time_ratio(1.0) {}
+
+	void initializeTimes(int path_size) {
+		link_arrival_times.resize(path_size);
+		link_departure_times.resize(path_size);
+	}
+};
+
+int g_ParserIntSequence(std::string str, std::vector<int>& vect)
+{
+	std::stringstream ss(str);
+	int i;
+	while (ss >> i)
+	{
+		vect.push_back(i);
+		if (ss.peek() == ';')
+			ss.ignore();
+	}
+
+	return vect.size();
+}
+int read_vehicle_file(vector<shared_ptr<CAgent_Simu>>& agents) {
+	CDTACSVParser parser_vehicle;
+	int count = 0;
+
+	if (!parser_vehicle.OpenCSVFile("vehicle.csv", true)) {
+		cerr << "Error: Cannot open vehicle.csv" << endl;
+		return 0;
+	}
+
+	while (parser_vehicle.ReadRecord()) {
+		int agent_id;
+		double departure_time;  // in min 
+		string link_ids;
+
+		if (!parser_vehicle.GetValueByFieldName("agent_id", agent_id) ||
+			!parser_vehicle.GetValueByFieldName("departure_time", departure_time) ||
+			!parser_vehicle.GetValueByFieldName("link_ids", link_ids)) {
+			continue;
+		}
+
+		auto agent = make_shared<CAgent_Simu>();
+		agent->agent_uid = agent_id;
+		agent->departure_time_in_min = departure_time;
+	 
+		vector<int> path_sequence;  // store link sequence id k 
+		if (g_ParserIntSequence(link_ids, path_sequence) > 0) {
+			agent->path_link_sequence = path_sequence;
+			agent->initializeTimes(path_sequence.size());
+			agent->agent_seq_no = agents.size();
+			parser_vehicle.GetValueByFieldName("o_zone_id", agent->o_zone_id);
+			parser_vehicle.GetValueByFieldName("d_zone_id", agent->d_zone_id);
+			parser_vehicle.GetValueByFieldName("total_distance_mile", agent->distannce);
+			agents.push_back(agent);
+			count++;
+		}
+	}
+
+	// Sorting agents by departure time in ascending order
+	sort(agents.begin(), agents.end(), [](const shared_ptr<CAgent_Simu>& a, const shared_ptr<CAgent_Simu>& b) {
+		return a->departure_time_in_min < b->departure_time_in_min;
+		});
+
+
+
+	parser_vehicle.CloseCSVFile();
+
+	// Print the number of vehicles loaded
+	cout << "Number of vehicles loaded: " << count << endl;
+	return count;
+}
+
+// Global state management
+struct SimulationState {
+	// Per-second state variables
+	vector<vector<double>> linkOutFlowCapacity;    // State per second
+	vector<vector<double>> linkOutFlowState;       // State per second
+
+	// Per-minute state variables 
+	vector<vector<double>> linkCumulativeArrival;  // Aggregated per minute
+	vector<vector<double>> linkCumulativeDeparture;// Aggregated per minute
+	vector<vector<double>> linkWaitingTime;        // Tracked per minute
+
+	void initialize(int numLinks, int demandPeriodStartHours, int demandPeriodEndHours) {
+		const int BUFFER_HOURS = 2;  // 120 minutes buffer
+		int intervalsPerMin = (demandPeriodEndHours - demandPeriodStartHours + BUFFER_HOURS) * 60;
+		int intervalsPerSec = intervalsPerMin * 60;
+
+		// Initialize per-second arrays
+		linkOutFlowCapacity.resize(numLinks, vector<double>(intervalsPerSec));
+		linkOutFlowState.resize(numLinks, vector<double>(intervalsPerSec));
+
+		// Initialize per-minute arrays
+		linkCumulativeArrival.resize(numLinks, vector<double>(intervalsPerMin));
+		linkCumulativeDeparture.resize(numLinks, vector<double>(intervalsPerMin));
+		linkWaitingTime.resize(numLinks, vector<double>(intervalsPerMin));
+	}
+
+	void cleanup() {
+		linkOutFlowCapacity.clear();
+		linkOutFlowState.clear();
+		linkCumulativeArrival.clear();
+		linkCumulativeDeparture.clear();
+		linkWaitingTime.clear();
+	}
+};
+
+class TrafficSimulator {
+private:
+	SimulationState state;
+	int numLinks;
+	int numIntervals;
+	const double SECONDS_PER_INTERVAL = 0.1;  // 6 seconds
+
+	void initializeMemory() {
+		state.initialize(numLinks, demand_period_starting_hours, demand_period_ending_hours);
+	}
+
+	void processSignalizedIntersections() {
+		for (int link = 0; link < numLinks; ++link) {
+			if (!Link[link].timing_arc_flag) continue;
+
+			int cycleLength = Link[link].cycle_length;
+			int startGreen = Link[link].start_green_time;
+			int endGreen = Link[link].end_green_time;
+
+			if (endGreen < startGreen) {
+				endGreen += cycleLength;
+			}
+
+			processSignalTimings(link, cycleLength, startGreen, endGreen);
+		}
+	}
+
+	void processSignalTimings(int link, int cycleLength, int startGreen, int endGreen) {
+		int numCycles = (demand_period_ending_hours - demand_period_starting_hours) * 60 / fmax(1.0f, cycleLength);
+
+		for (int cycle = 0; cycle < numCycles; ++cycle) {
+			for (int t = cycle * cycleLength + startGreen;
+				t <= cycle * cycleLength + endGreen; t++) {
+
+				float saturationFlow = Link[link].Lane_SaturationFlowRate *
+					Link[link].lanes / 3600.0;
+
+				state.linkOutFlowCapacity[link][t] = (t % 2 == 0) ?
+					Link[link].lanes : 0;
+				state.linkOutFlowState[link][t] = 1;
+			}
+		}
+	}
+
+public:
+	TrafficSimulator(int links, int intervals) : numLinks(links), numIntervals(intervals) {
+		initializeMemory();
+	}
+
+	~TrafficSimulator() {
+		state.cleanup();
+	}
+
+};
+int number_of_seconds_per_interval = 6; 
+class LinkQueue {
+public:
+	deque<int> loading_entrance_queue;       // Queue of vehicle IDs waiting to enter at loading stage
+	deque<int> entrance_queue;       // Queue of vehicle IDs waiting to enter
+	deque<int> exit_queue;          // Queue of vehicle IDs waiting to exit
+	double capacity_per_time_step;   // Maximum number of vehicles that can enter/exit per time step
+	double free_flow_time;          // Free flow travel time in minutes
+	int number_of_lanes;            // Number of lanes
+	double length;                  // Link length
+	double spatial_capacity;        // Maximum number of vehicles that can be on the link
+
+	LinkQueue() :
+		capacity_per_time_step(0),
+		free_flow_time(0),
+		number_of_lanes(1),
+		length(0),
+		spatial_capacity(0) {}
+
+	void reset() {
+		entrance_queue.clear();
+		exit_queue.clear();
+	}
+
+	void setup(link_record link_record_element)
+	{
+		free_flow_time = link_record_element.FreeTravelTime;
+		number_of_lanes = link_record_element.lanes;
+		length = link_record_element.length;   // internal unit: miles
+		capacity_per_time_step = link_record_element.Link_Capacity / 3600;
+		double kjam = 300; 
+		spatial_capacity = link_record_element.length * kjam;
+	}
+};
+
+class AgentLogger {
+private:
+	ofstream agent_file;
+
+	string convertTimeToHHMMSS(double time_in_min) {
+		int hours = (int)(time_in_min / 60);
+		int minutes = (int)(time_in_min) % 60;
+		int seconds = (int)((time_in_min - (int)time_in_min) * 60);
+
+		char buffer[9];
+		sprintf(buffer, "%02d:%02d:%02d", hours, minutes, seconds);
+		return string(buffer);
+	}
+
+	string vectorToString(const vector<int>& vec, const string& delimiter = ";") {
+		stringstream ss;
+		for (size_t i = 0; i < vec.size(); ++i) {
+			if (i > 0) ss << delimiter;
+			ss << vec[i];
+		}
+		return ss.str();
+	}
+
+	string formatTimesVector(const vector<double>& times, int l_demand_period_starting_hours, const string& delimiter = ";") {
+		stringstream ss;
+		for (size_t i = 0; i < times.size(); ++i) {
+			if (i > 0) ss << delimiter;
+			if (times[i] >= 0) {
+				ss << convertTimeToHHMMSS(l_demand_period_starting_hours*60.0+ times[i] * number_of_seconds_per_interval / 60.0);
+			}
+			else {
+				ss << "NA";
+			}
+		}
+		return ss.str();
+	}
+
+public:
+	AgentLogger() {
+		agent_file.open("trajectory.csv");
+		// Write header
+		agent_file << "agent_id,departure_time,departure_time_hhmmss,loaded_status,o_zone_id,d_zone_id,distance,travel_time,"
+			<< "current_link_seq_no,link_ids,arrival_times,departure_times,geometry\n";
+	}
+
+
+	string getTrajectoryGeometry(const vector<int>& path_link_sequence) {
+		stringstream ss;
+
+		ss << fixed << setprecision(7);  // Fixed notation with 7 decimal places
+		ss << "\"LINESTRING (";
+
+		bool first_point = true;
+		for (int link_id : path_link_sequence) {
+			// Get from node of link
+			if (!first_point) {
+				ss << ", ";
+			}
+
+			int from_node = Link[link_id].internal_from_node_id;
+			ss << g_node_vector[from_node].x << " " << g_node_vector[from_node].y;
+
+			// Add to node only for the last link
+			if (link_id == path_link_sequence.back()) {
+				int to_node = Link[link_id].internal_to_node_id;
+				ss << ", " << g_node_vector[to_node].x << " " << g_node_vector[to_node].y;
+			}
+
+			first_point = false;
+		}
+		ss << ")\"";
+		return ss.str();
+	}
+	void logAgent(const shared_ptr<CAgent_Simu>& agent, int l_demand_period_starting_hours) {
+
+
+
+		double travel_time = (agent->link_departure_times[agent->current_link_seq_no] -
+			agent->link_arrival_times[0]) * number_of_seconds_per_interval / 60.0; 
+
+		agent_file << agent->agent_uid << ","
+			<< agent->departure_time_in_min << ","
+			<< convertTimeToHHMMSS(agent->departure_time_in_min) << ","
+			<< (agent->loaded ? "1" : "0") << ","
+			<< agent->o_zone_id << "," 
+			<< agent->d_zone_id << ","
+			<< agent->distannce << ","
+			<< agent->current_link_seq_no << ","
+			<< vectorToString(agent->path_link_sequence) << ","
+			<< formatTimesVector(agent->link_arrival_times, l_demand_period_starting_hours) << ","
+			<< formatTimesVector(agent->link_departure_times, l_demand_period_starting_hours) << ","
+			<< getTrajectoryGeometry(agent->path_link_sequence) << "\n";
+	}
+
+	void logAllAgents(const vector<shared_ptr<CAgent_Simu>>& agents, int l_demand_period_starting_hours) {
+		for (const auto& agent : agents) {
+			logAgent(agent,l_demand_period_starting_hours);
+		}
+		agent_file.flush();
+	}
+
+	~AgentLogger() {
+		agent_file.close();
+	}
+};
+
+class ParallelQueueSimulator {
+public: 
+	SimulationLogger logger;
+	// Add debugging counters
+	int total_loaded_agents = 0;
+	int total_link_transfers = 0;
+	int total_node_transfers = 0;
+	int total_completed_trips = 0;
+	ofstream debug_file;
+
+
+	SimulationState state;
+	vector<LinkQueue> link_queues;
+	vector<shared_ptr<CAgent_Simu>> agents;
+	int num_links;
+	int num_nodes;
+
+	void setupLink_queue()
+	{
+		for (int l = 1; l <= num_links; l++) {
+					link_queues[l].setup(Link[l]);
+					}
+	}
+
+
+	double calculateOutflowCapacity(int link_id, int time_step, int total_intervals) {
+		const LinkQueue& link = link_queues[link_id];
+		double base_capacity;
+
+		// 1. Basic capacity calculation based on lanes and flow rate
+		float discharge_rate_per_sec = link.capacity_per_time_step;
+		base_capacity = discharge_rate_per_sec * number_of_seconds_per_interval;
+		int BUFFER_HOURS = 2;  // 120 minutes buffer
+		// 4. Special conditions handling
+		if (total_intervals - time_step <= BUFFER_HOURS * 60 * number_of_seconds_per_interval) {
+			// After loading period, increase capacity to clear network
+			base_capacity *= 10;  // Multiplier for quick network clearance
+		}
+		//// 2. Signal timing handling
+		//if (g_link_vector[link_id].timing_arc_flag) {
+		//	int cycle_length = g_link_vector[link_id].cycle_length;
+		//	int start_green = g_link_vector[link_id].start_green_time;
+		//	int end_green = g_link_vector[link_id].end_green_time;
+
+		//	if (end_green < start_green) {
+		//		end_green += cycle_length;  // Handle wraparound
+		//	}
+
+		//	int time_in_cycle = time_step % cycle_length;
+		//	if (time_in_cycle >= start_green && time_in_cycle <= end_green) {
+		//		// Green phase - use saturation flow rate
+		//		float saturation_flow_rate = g_link_vector[link_id].saturation_flow_rate *
+		//			link.number_of_lanes / 3600.0;
+		//		base_capacity = saturation_flow_rate * number_of_seconds_per_interval;
+		//	}
+		//	else {
+		//		// Red phase
+		//		return 0;
+		//	}
+		//}
+
+		//// 3. Capacity reduction handling (incidents, work zones, etc.)
+		//if (!g_link_vector[link_id].capacity_reduction_map.empty()) {
+		//	int current_time_in_min = time_step * number_of_seconds_per_interval / 60;
+		//	auto it = g_link_vector[link_id].capacity_reduction_map.find(current_time_in_min);
+
+		//	if (it != g_link_vector[link_id].capacity_reduction_map.end()) {
+		//		base_capacity *= it->second;  // Apply reduction factor
+		//	}
+		//}
+
+
+
+		//// 5. Queue spillback check
+		//if (link.exit_queue.size() >= link.spatial_capacity) {
+		//	// If link is at spatial capacity, reduce outflow
+		//	base_capacity = 0;
+		//}
+
+		// 6. Randomization for more realistic flow
+		unsigned int RandomSeed = 101 + time_step;  // Simple seed based on time
+		float residual = base_capacity - floor(base_capacity);
+		RandomSeed = (LCG_a * RandomSeed + LCG_c) % LCG_M;  // Linear Congruential Generator
+		float random_ratio = float(RandomSeed) / LCG_M;
+
+		if (random_ratio < residual) {
+			base_capacity = ceil(base_capacity);
+		}
+		else {
+			base_capacity = floor(base_capacity);
+		}
+
+		// 7. Final bounds check
+		return max(0.0, base_capacity);  // Maximum 2 vehicles per lane per interval
+	}
+	void estimateLinkCapacities(int t,  int total_intervals) {
+
+		for (int l = 1; l <= num_links; l++) {
+			double outflow_capacity = calculateOutflowCapacity(l, t , total_intervals);
+			state.linkOutFlowCapacity[l][t] = outflow_capacity;
+		}
+	}
+
+	void synchronizeBottlenecksFromNodetoLink(int t) {
+#pragma omp parallel for
+		for (int i = 1; i <= num_nodes; i++) {
+			auto& node = g_node_vector[i];
+			double total_demand = 0;
+
+			// Calculate total demand
+			for (int link_id : node.m_incoming_link_seq_no_vector) {
+				total_demand += link_queues[link_id].exit_queue.size();
+			}
+
+			//if (total_demand >= 1)
+			//{
+			//	// Distribute capacity if bottleneck exists
+			//	for (int link_id : node.m_incoming_link_seq_no_vector) {
+			//		if (total_demand > state.linkOutFlowCapacity[link_id][t]) {
+			//			double capacity_ratio = state.linkOutFlowCapacity[link_id][t] / total_demand;
+			//			state.linkOutFlowCapacity[link_id][t] *= capacity_ratio;
+			//		}
+			//	}
+			//}
+		}
+	}
+
+	void logSimulationStatus(int t) {
+		int t_in_min = t * number_of_seconds_per_interval / 60;
+		if (t % 600 == 0) {  // Log every minute
+			fprintf(summary_log_file, "\n=== Simulation Time: %d minutes ===\n", t_in_min);
+			fprintf(summary_log_file, "Total agents loaded: %d\n", total_loaded_agents);
+			fprintf(summary_log_file, "Total link transfers: %d\n", total_link_transfers);
+			fprintf(summary_log_file, "Total node transfers: %d\n", total_node_transfers);
+			fprintf(summary_log_file, "Total completed trips: %d\n", total_completed_trips);
+			debug_file << t << ",status," << total_loaded_agents << ","
+				<< total_link_transfers << "," << total_node_transfers
+				<< ",minute_summary\n";
+
+			printf("\n=== Simulation Time: %d minutes ===\n", t_in_min);
+			printf( "Total agents loaded: %d\n", total_loaded_agents);
+			printf( "Total link transfers: %d\n", total_link_transfers);
+			printf("Total node transfers: %d\n", total_node_transfers);
+			printf( "Total completed trips: %d\n", total_completed_trips);
+
+
+
+		}
+	}
+
+	void loadNewAgentsPerSimuInterval(int t) {
+		int agents_loaded_this_step = 0;
+		for (int l = 1; l <= num_links; l++) {
+			LinkQueue& link = link_queues[l];
+			while (!link.loading_entrance_queue.empty()) {
+				int agent_seq_no = link.loading_entrance_queue.front();
+				auto agent = agents[agent_seq_no];
+
+				if (agent->departure_time_in_simu_interval == t) {
+					link.loading_entrance_queue.pop_front();
+					link.entrance_queue.push_back(agent->agent_seq_no);
+					agent->link_arrival_times[agent->current_link_seq_no] = t;
+
+					total_loaded_agents++;
+					agents_loaded_this_step++;
+
+
+				}
+				else {
+					break;
+				}
+			}
+		}
+
+		
+	}
+
+	void processNodeTransfers(int t) {
+		int t_in_min = t * number_of_seconds_per_interval / 60;
+
+#pragma omp parallel for
+		for (int i = 1; i <= num_nodes; i++) {
+			auto& node = g_node_vector[i];
+			int node_transfers = 0;
+
+			for (int link_id : node.m_incoming_link_seq_no_vector) {
+				auto& link = link_queues[link_id];
+
+				while (!link.exit_queue.empty()) {
+					int agent_seq_no = link.exit_queue.front();
+					auto agent = agents[agent_seq_no];
+
+					if (agent->link_departure_times[agent->current_link_seq_no] > t) {
+						break;
+					}
+
+					if (agent->current_link_seq_no >= agent->path_link_sequence.size() - 1) {
+						// Agent completed trip
+						link.exit_queue.pop_front();
+#pragma omp atomic
+						total_completed_trips++;
+						debug_file << t << ",complete," << agent->agent_uid << ","
+							<< link_id << ",0,trip_completed\n";
+						continue;
+					}
+
+					int next_link_id = agent->path_link_sequence[agent->current_link_seq_no + 1];
+					auto& next_link = link_queues[next_link_id];
+
+					if (state.linkOutFlowCapacity[link_id][t] >= 1 &&
+						next_link.entrance_queue.size() < next_link.capacity_per_time_step) {
+
+						link.exit_queue.pop_front();
+						next_link.entrance_queue.push_back(agent_seq_no);
+
+						agent->current_link_seq_no++;
+						agent->link_arrival_times[agent->current_link_seq_no] = t;
+
+						node_transfers++;
+#pragma omp atomic
+						total_node_transfers++;
+
+						debug_file << t << ",transfer," << agent->agent_uid << ","
+							<< link_id << "->" << next_link_id << ","
+							<< next_link.entrance_queue.size() << ",node_transfer\n";
+					}
+					else {
+						// Log capacity constraint
+						debug_file << t << ",blocked," << agent->agent_uid << ","
+							<< link_id << "," << next_link.entrance_queue.size()
+							<< ",capacity_constraint\n";
+						break;
+					}
+				}
+			}
+
+			if (node_transfers > 0) {
+#pragma omp critical
+				{
+					fprintf(summary_log_file, "Time %d: Node %d processed %d transfers\n",
+						t, i, node_transfers);
+				}
+			}
+		}
+	}
+
+
+	void processLinkTransfer(int t) {
+
+		int t_in_min = t * number_of_seconds_per_interval / 60; 
+#pragma omp parallel for
+		for (int l = 1; l <= num_links; l++) {
+			auto& link = link_queues[l];
+
+			while (!link.entrance_queue.empty()) {
+				int agent_seq_no = link.entrance_queue.front();
+				auto agent = agents[agent_seq_no];
+
+				double arrival_time_in_simu_interval = t;
+				double free_flow_time = link.free_flow_time * agent->desired_free_travel_time_ratio;
+				agent->link_departure_times[agent->current_link_seq_no] =
+					t + (int)(free_flow_time * 60 / number_of_seconds_per_interval);
+
+				link.entrance_queue.pop_front();
+				link.exit_queue.push_back(agent_seq_no);
+				//state.linkCumulativeArrival[l][t_in_min]++;
+			}
+		}
+	}
+
+public:
+	ParallelQueueSimulator(int links_count, int nodes_count)
+		: num_links(links_count), num_nodes(nodes_count) {
+		link_queues.resize(num_links + 1);
+		state.initialize(num_links + 1, demand_period_starting_hours, demand_period_ending_hours);
+
+		// Initialize debug file
+		debug_file.open("simulation_debug.csv");
+		debug_file << "time,event_type,agent_id,link_id,queue_size,details\n";
+	}
+
+	~ParallelQueueSimulator() {
+		debug_file.close();
+	}
+
+	void simulate(int total_intervals, int l_demand_period_starting_hours) {
+		AgentLogger agent_logger;
+		for (int t = 0; t < total_intervals; t++) 
+		{
+			loadNewAgentsPerSimuInterval(t);
+			estimateLinkCapacities(t, total_intervals);
+			synchronizeBottlenecksFromNodetoLink(t);
+			processNodeTransfers(t);
+			processLinkTransfer(t);
+			logSimulationStatus(t);
+
+			if (t>=600 && total_completed_trips > 0 && total_completed_trips == total_loaded_agents)
+				break;
+		}
+
+		agent_logger.logAllAgents(agents, l_demand_period_starting_hours);
+	}
+	void loadAgents(const vector<shared_ptr<CAgent_Simu>>& agent_list, int demand_starting_time_in_simu_inteval) {
+		fprintf(summary_log_file, "\n=== Loading Agents ===\n");
+		fprintf(summary_log_file, "Total agents to load: %zu\n", agent_list.size());
+		fprintf(summary_log_file, "Demand starting time in simulation interval: %d\n", demand_starting_time_in_simu_inteval);
+
+		agents = agent_list;
+		int agents_with_empty_path = 0;
+		map<int, int> link_loading_counts;  // Track how many agents are assigned to each first link
+
+		for (auto& agent : agents) {
+			agent->loaded = false;
+			agent->current_link_seq_no = 0;
+
+			// Log agent initial setup
+			debug_file << "0,init," << agent->agent_uid << ",0,0,departure_time="
+				<< agent->departure_time_in_min << "\n";
+
+			if (!agent->path_link_sequence.empty()) {
+				int first_link = agent->path_link_sequence[0];
+				agent->departure_time_in_simu_interval =
+					(int)(agent->departure_time_in_min * 60 / number_of_seconds_per_interval) - demand_starting_time_in_simu_inteval;
+
+				link_queues[first_link].loading_entrance_queue.push_back(agent->agent_seq_no);
+				link_loading_counts[first_link]++;
+
+				// Log successful agent assignment
+				debug_file << "0,assign," << agent->agent_uid << "," << first_link << ","
+					<< link_queues[first_link].loading_entrance_queue.size()
+					<< ",departure_interval=" << agent->departure_time_in_simu_interval << "\n";
+			}
+			else {
+				agents_with_empty_path++;
+				// Log error for agents with empty paths
+				debug_file << "0,error," << agent->agent_uid << ",0,0,empty_path\n";
+			}
+		}
+
+
+		//// Log link loading distribution
+		//fprintf(summary_log_file, "\nInitial link loading distribution:\n");
+		//for (const auto& [link_id, count] : link_loading_counts) {
+		//	fprintf(summary_log_file, "Link %d: %d agents\n", link_id, count);
+		//	debug_file << "0,link_summary," << link_id << ",0," << count
+		//		<< ",initial_loading\n";
+		}
+
+}; 
+int SimulationAPI()
+{
+
+	fopen_s(&summary_log_file, "summary_log_file.txt", "w");
+
+	double* MainVolume, * SubVolume, * SDVolume, Lambda;
+	int*** MDMinPathPredLink;
+
+	read_settings_file();
+	read_mode_type_file();
+	fopen_s(&logfile, "TAP_log.csv", "w");  // Open the log file for writing.
+	no_nodes = get_number_of_nodes_from_node_file(no_zones, FirstThruNode);
+	number_of_links = get_number_of_links_from_link_file();
+
+	printf("# of nodes= %d, largest zone id = %d, First Through Node (Seq No) = %d, number of links = %d\n", no_nodes, no_zones,
+		FirstThruNode, number_of_links);
+
+	fprintf(summary_log_file, "no_nodes= %d, no_zones = %d, FirstThruNode (seq No) = %d, number_of_links = %d\n", no_nodes, no_zones,
+		FirstThruNode, number_of_links);
+
+
+	double system_wide_travel_time = 0;
+	double system_least_travel_time = 0;
+
+	//fprintf(logfile,
+	//    "iteration_no,link_id,internal_from_node_id,internal_to_node_id,volume,capacity,voc,"
+	//    "fftt,travel_time,delay\n");
+
+
+
+	Init(number_of_modes, no_zones);
+
+
+	InitializeLinkIndices(number_of_modes, no_zones, TotalAssignIterations);
+	int total_simu_time_intervals = (demand_period_ending_hours - demand_period_starting_hours) * 3600 / number_of_seconds_per_interval;
+
+	vector<shared_ptr<CAgent_Simu>> agents;
+	read_vehicle_file(agents);
+	ParallelQueueSimulator simulator(number_of_links, no_nodes);
+	simulator.setupLink_queue();
+	simulator.loadAgents(agents, demand_period_starting_hours*3600/number_of_seconds_per_interval);
+	simulator.simulate(total_simu_time_intervals, demand_period_starting_hours);
+
+	fclose(summary_log_file);
+	return 0;
+}
+int main()
+{
+	AssignmentAPI();
+	SimulationAPI();
+}
