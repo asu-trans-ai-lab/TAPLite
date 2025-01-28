@@ -572,14 +572,10 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
 			{
 
 
-
 				//	printf("Assign", "Assigning origin %6d.", Orig);
 				for (Dest = 1; Dest <= no_zones; Dest++)  // Dest zone 
 				{
 					if (Dest == Orig)
-						continue;
-
-					if (zone_outbound_link_size[Dest] == 0)  // there is no outbound or inbound link from the origin zone
 						continue;
 
 					if (shortest_path_log_flag || Assignment_iteration_no == 0)
@@ -3836,5 +3832,5 @@ int SimulationAPI()
 int main()
 {
 	AssignmentAPI();
-	SimulationAPI();
+	//SimulationAPI();
 }
