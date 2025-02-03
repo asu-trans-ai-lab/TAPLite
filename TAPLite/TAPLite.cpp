@@ -23,6 +23,7 @@
 
 #define VALID(x) ((x) != -1)
 
+#include "path_engine.h"
 #include <cstdio>
 #include <fstream>
 #include <iostream>
@@ -3833,4 +3834,8 @@ int main()
 {
 	AssignmentAPI();
 	//SimulationAPI();
+}
+
+void DTALiteAPI() {
+	main();
 }
