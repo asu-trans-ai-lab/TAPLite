@@ -97,6 +97,7 @@ struct link_record {
 
 	int timing_arc_flag, cycle_length, start_green_time, end_green_time;
 
+
 	link_record()
 	{
 		link_type = 1;
@@ -122,6 +123,7 @@ struct link_record {
 		cycle_length = 60;
 		start_green_time = 0;
 		end_green_time = 30; 
+
 	}
 	void setup(int num_of_modes)
 	{
@@ -167,9 +169,9 @@ void ExitMessage(const char* format, ...);
 #include "TAPlite.h"
 
 struct link_record* Link;
-int* FirstLinkFrom;
+int* FirstLinkFrom;  // used in shortet path algorithm 
 int* LastLinkFrom;
-sorted_list* LinksTo;
+
 
 double Link_GenCost(int k, double* Volume);
 double LinkCost_Integral(int k, double* Volume);
@@ -741,6 +743,152 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
 #include <iostream>
 
 // Hash table to store unique (node sum, link sum) combinations
+
+
+//---------------------------------------------------------------------------
+// ODME via Gradient Descent
+//---------------------------------------------------------------------------
+
+void performODME()
+{
+	// Define a target total vehicle miles travelled (VMT)
+	double VMT_target = g_System_VMT;
+
+	// Weights for each component of the objective function
+	double w_link = g_ODME_link_volume_penalty;
+	double w_od = 1.0;
+	double w_vmt = g_ODME_VMT_penalty;
+
+	// Gradient descent parameters
+	double step_size = 0.001;
+	int maxIter = 1000;
+	double tol = 1e-6;
+
+
+	// Get the number of modes and zones (note: index 0 is unused)
+	int numModes = number_of_modes;
+	int numZones = no_zones;
+
+	// Gradient descent iterations
+	for (int iter = 0; iter < maxIter; ++iter)
+	{
+		// 1. Compute link flows from OD flows using the candidate routes.
+		std::vector<double> linkFlows(number_of_links + 1, 0.0);
+
+		// Loop over modes and OD pairs (skip unused indices)
+		for (int m = 1; m < numModes; ++m)
+		{
+			for (int Orig = 1; Orig <= numZones; ++Orig)
+			{
+				for (int Dest = 1; Dest <= numZones; ++Dest)
+				{
+					if (Orig == Dest) continue;
+					float od_flow = MDODflow[m][Orig][Dest];
+					if (od_flow <= 0) continue;
+
+					// Count the number of valid (non-empty) routes for this OD pair.
+					int routeCount = 0;
+					for (int route_id = 0; route_id < (int)linkIndices[m][Orig][Dest].size(); ++route_id)
+					{
+						if (!linkIndices[m][Orig][Dest][route_id].empty())
+							routeCount++;
+					}
+					if (routeCount == 0)
+						continue;
+
+					// Assume OD flow is equally split among available routes.
+					float routeFlow = od_flow / routeCount;
+					for (int route_id = 0; route_id < (int)linkIndices[m][Orig][Dest].size(); ++route_id)
+					{
+						if (linkIndices[m][Orig][Dest][route_id].empty())
+							continue;
+						for (int link_id : linkIndices[m][Orig][Dest][route_id])
+						{
+							if (link_id >= 0 && link_id < (int)linkFlows.size())
+								linkFlows[link_id] += routeFlow;
+						}
+					}
+				}
+			}
+		}
+
+		// 2. Compute total VMT from current link flows.
+		double VMT = 0.0;
+		for (size_t l = 0; l < linkFlows.size(); ++l)
+		{
+			VMT += linkFlows[l] * Link[l].length;
+		}
+
+		// 3. Compute gradient for each OD pair.
+		double maxGrad = 0.0;
+		// We'll update MDODflow[m][Orig][Dest] in place.
+		for (int m = 1; m < numModes; ++m)
+		{
+			for (int Orig = 1; Orig <= numZones; ++Orig)
+			{
+				for (int Dest = 1; Dest <= numZones; ++Dest)
+				{
+					if (Orig == Dest)
+						continue;
+
+					float od_flow = MDODflow[m][Orig][Dest];
+					// Count valid routes and accumulate link usage.
+					int routeCount = 0;
+					std::unordered_map<int, int> linkUsage; // key: link_id, value: count of routes using this link
+					for (int route_id = 0; route_id < (int)linkIndices[m][Orig][Dest].size(); ++route_id)
+					{
+						if (linkIndices[m][Orig][Dest][route_id].empty())
+							continue;
+						routeCount++;
+						for (int link_id : linkIndices[m][Orig][Dest][route_id])
+						{
+							linkUsage[link_id]++;
+						}
+					}
+					if (routeCount == 0)
+						continue;
+
+					// Compute gradient contributions.
+					double grad_link = 0.0;
+					double grad_vmt = 0.0;
+					// For each link used in any candidate route
+					for (auto& entry : linkUsage)
+					{
+						int link_id = entry.first;
+						int count_usage = entry.second;
+						// Sensitivity: fraction of OD flow that affects link flow.
+						double sensitivity = (double)count_usage / routeCount;
+
+						if(Link[link_id].Obs_volume >1)
+						{ 
+						grad_link += 2.0 * w_link * (linkFlows[link_id] - Link[link_id].Obs_volume) * sensitivity;
+						}
+						grad_vmt += 2.0 * w_vmt * (VMT - VMT_target) * (Link[link_id].length * sensitivity);
+					}
+					// OD target error term.
+					double grad_od = 0;
+					//double grad_od = 2.0 * w_od * (od_flow - targetMDODflow[m][Orig][Dest]);
+					double total_grad = grad_link + grad_vmt + grad_od;
+
+					// Update maximum gradient (for convergence checking)
+					maxGrad = std::max(maxGrad, std::fabs(total_grad));
+
+					// Update OD flow using gradient descent step.
+					MDODflow[m][Orig][Dest] -= step_size * total_grad;
+					if (MDODflow[m][Orig][Dest] < 0)
+						MDODflow[m][Orig][Dest] = 0;
+				}
+			}
+		}
+
+		// Check for convergence.
+		if (maxGrad < tol)
+		{
+			std::cout << "Convergence reached after " << iter << " iterations.\n";
+			break;
+		}
+	} // End of gradient descent loop
+}
 
 
 void OutputRouteDetails(const std::string& filename)
@@ -1638,7 +1786,7 @@ int AssignmentAPI()
 	no_nodes = get_number_of_nodes_from_node_file(no_zones, FirstThruNode);
 	number_of_links = get_number_of_links_from_link_file();
 
-	printf("# of nodes= %d, largest zone id = %d, First Through Node (Seq No) = %d, number of links = %d\n", no_nodes, no_zones,
+	printf("# of nodes= %d, largest zone id (# of zones) = %d, First Through Node (Seq No) = %d, number of links = %d\n", no_nodes, no_zones,
 		FirstThruNode, number_of_links);
 
 	fprintf(summary_log_file, "no_nodes= %d, no_zones = %d, FirstThruNode (seq No) = %d, number_of_links = %d\n", no_nodes, no_zones,
@@ -2301,17 +2449,7 @@ static void InitLinkPointers(char* LinksFileName)
 
 }
 
-void FindLinksTo(void)
-{
-	int Node, k;
 
-	LinksTo = (sorted_list*)Alloc_1D(no_nodes, sizeof(sorted_list*));
-	for (Node = 1; Node <= no_nodes; Node++)
-		LinksTo[Node] = NULL;
-
-	for (k = 1; k <= number_of_links; k++)
-		AddToSortedList(k, &(LinksTo[Link[k].internal_to_node_id]));
-}
 void InitLinks()
 {
 	char LinksFileName[100] = "link.csv";
@@ -2321,7 +2459,6 @@ void InitLinks()
 
 	Link = (struct link_record*)Alloc_1D(number_of_links, sizeof(struct link_record));
 	ReadLinks();
-	FindLinksTo();
 	InitLinkPointers(LinksFileName);
 	UpdateLinkAdditionalCost();
 }
@@ -2520,19 +2657,19 @@ double Link_Travel_Time(int k, double* Volume)
 	Link[k].Travel_time =
 		Link[k].FreeTravelTime * (1.0 + Link[k].VDF_Alpha * (pow(IncomingDemand / fmax(0.1, Link[k].Link_Capacity), Link[k].VDF_Beta)));
 
-	if (g_ODME_mode == 1 && Link[k].Obs_volume >= 0)
-	{
-		Link[k].Travel_time += 2 * g_ODME_link_volume_penalty * (Volume[k] - Link[k].Obs_volume);
+	//if (g_ODME_mode == 1 && Link[k].Obs_volume >= 0)
+	//{
+	//	Link[k].Travel_time += 2 * g_ODME_link_volume_penalty * (Volume[k] - Link[k].Obs_volume);
 
-	}
+	//}
 
-	if (g_ODME_mode == 1 && g_ODME_obs_VMT > 1 && Link[k].link_type >= 1 && g_System_VMT >= 1)  //p[hsical links
-	{
-		Link[k].Travel_time += 2 * g_ODME_VMT_penalty / number_of_links * (g_System_VMT - g_ODME_obs_VMT) * Link[k].length;
+	//if (g_ODME_mode == 1 && g_ODME_obs_VMT > 1 && Link[k].link_type >= 1 && g_System_VMT >= 1)  //p[hsical links
+	//{
+	//	Link[k].Travel_time += 2 * g_ODME_VMT_penalty / number_of_links * (g_System_VMT - g_ODME_obs_VMT) * Link[k].length;
 
 
 
-	}
+	//}
 	if (Link[k].Travel_time < 0)
 		Link[k].Travel_time = 0;
 	Link[k].BPR_TT = Link[k].Travel_time;
@@ -2953,9 +3090,7 @@ void CloseLinks(void)
 	free(Link);
 	free(FirstLinkFrom);
 	free(LastLinkFrom);
-	for (Node = 1; Node <= no_nodes; Node++)
-		FreeSortedList(LinksTo[Node]);
-	free(LinksTo);
+
 }
 
 
