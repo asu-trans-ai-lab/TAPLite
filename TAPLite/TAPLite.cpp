@@ -224,8 +224,9 @@ int g_ODME_mode = 0;
 double g_ODME_obs_VMT = -1;
 double g_System_VMT = 0;
 
-double g_ODME_link_volume_penalty = 0.01;  // relative weight on volume , convert the deviation of link volume to the travel time 
-double g_ODME_VMT_penalty = 0.01;  // relative weight on VMT , convert the deviation of VMT to the travel time 
+double g_ODME_link_volume_penalty = 0.1;  // relative weight on volume , convert the deviation of link volume to the travel time 
+double g_ODME_VMT_penalty = 1e-6;  // relative weight on VMT , convert the deviation of VMT to the travel time 
+double g_ODME_od_penalty = 0.01;  // relative weight on od , 
 FILE* summary_log_file;
 
 
@@ -767,9 +768,326 @@ std::vector<double> computeTheta(const std::vector<double>& lambda) {
 
 	return theta;
 }
-
-void performODME(std::vector<double> theta)
+void performODME(std::vector<double> theta, double* MainVolume, struct link_record* Link)
 {
+    // Open log file (this will overwrite any existing file with the same name)
+    std::ofstream logFile("ODME_log.txt");
+    if (!logFile.is_open()) {
+        std::cerr << "Error: Could not open ODME_log.txt for writing." << std::endl;
+        return;
+    }
+    logFile << "Starting ODME process.\n";
+
+    // Define target and weights
+    double VMT_target = g_ODME_obs_VMT;
+    double w_link = g_ODME_link_volume_penalty;
+    double w_od = g_ODME_od_penalty;
+    double w_vmt = g_ODME_VMT_penalty;
+
+    // Gradient descent and line search parameters
+    double step_size = 0.5;   // initial step size guess
+    int maxIter = 1000;
+    double tol = 1e-6;
+    const double armijo_c = 0.05; // Armijo condition constant
+
+    // Get the number of modes and zones (note: index 0 is unused)
+    int numModes = number_of_modes;
+    int numZones = no_zones;
+
+    // --------------------------------------------------
+    // Helper lambda to compute the overall objective function.
+    // The objective is the sum of:
+    //   - OD demand deviations: w_od * (MDODflow - targetMDODflow)^2,
+    //   - Link flow deviations: w_link * (linkFlow - Link[l].Obs_volume)^2,
+    //   - VMT deviations: w_vmt * (VMT - VMT_target)^2.
+    auto computeObjectiveForMDOD = [&](const auto& mdod) -> double {
+        // Compute link flows from the given OD matrix "mdod"
+        std::vector<double> linkFlows(number_of_links + 1, 0.0);
+        for (int m = 1; m <= numModes; ++m) {
+            for (int Orig = 1; Orig <= numZones; ++Orig) {
+                for (int Dest = 1; Dest <= numZones; ++Dest) {
+                    if (Orig == Dest)
+                        continue;
+                    float od_flow = mdod[m][Orig][Dest];
+                    if (od_flow <= 0)
+                        continue;
+                    // Use available routes (assume equal split)
+                    int nRoutes = std::min(theta.size(), linkIndices[m][Orig][Dest].size());
+                    for (int route_id = 0; route_id < nRoutes; route_id++) {
+                        float routeFlow = od_flow * theta[route_id];
+                        if (linkIndices[m][Orig][Dest][route_id].empty())
+                            continue;
+                        for (int link_id : linkIndices[m][Orig][Dest][route_id]) {
+                            if (link_id >= 0 && link_id < static_cast<int>(linkFlows.size()))
+                                linkFlows[link_id] += routeFlow;
+                        }
+                    }
+                }
+            }
+        }
+        // Compute total VMT
+        double VMT = 0.0;
+        for (size_t l = 0; l < linkFlows.size(); ++l) {
+            VMT += linkFlows[l] * Link[l].length;
+        }
+        // Sum up the objective terms
+        double obj = 0.0;
+        // OD demand term:
+        for (int m = 1; m <= numModes; ++m) {
+            for (int Orig = 1; Orig <= numZones; ++Orig) {
+                for (int Dest = 1; Dest <= numZones; ++Dest) {
+                    if (Orig == Dest)
+                        continue;
+                    double diff = mdod[m][Orig][Dest] - targetMDODflow[m][Orig][Dest];
+                    obj += w_od * diff * diff;
+                }
+            }
+        }
+        // Link flow term:
+        for (size_t l = 0; l < linkFlows.size(); ++l) {
+            if (Link[l].Obs_volume > 1) {
+                double diff = linkFlows[l] - Link[l].Obs_volume;
+                obj += w_link * diff * diff;
+            }
+        }
+        // VMT term:
+        if (VMT_target > 1) {
+            double diff = VMT - VMT_target;
+            obj += w_vmt * diff * diff;
+        }
+        return obj;
+    };
+
+    // --------------------------------------------------
+    // Main gradient descent iterations with line search
+    for (int iter = 0; iter < maxIter; ++iter) {
+        logFile << "--------------------------------------------------\n";
+        logFile << "Iteration " << iter << " begins.\n";
+
+        // Compute the current objective value
+        double F_current = computeObjectiveForMDOD(MDODflow);
+        logFile << "Current objective = " << F_current << "\n";
+
+        // --- Log simple deviation measures ---
+        {
+            // OD deviation: compute sum of absolute differences (and average)
+            double totalODDev = 0.0;
+            int odCount = 0;
+            for (int m = 1; m <= numModes; ++m) {
+                for (int Orig = 1; Orig <= numZones; ++Orig) {
+                    for (int Dest = 1; Dest <= numZones; ++Dest) {
+                        if (Orig == Dest)
+                            continue;
+                        double diff = MDODflow[m][Orig][Dest] - targetMDODflow[m][Orig][Dest];
+                        totalODDev += std::fabs(diff);
+                        odCount++;
+                    }
+                }
+            }
+            double avgODDev = (odCount > 0 ? totalODDev / odCount : 0.0);
+
+            // Link deviation: compute link flows and compare with observed volume
+            std::vector<double> linkFlows(number_of_links + 1, 0.0);
+            for (int m = 1; m <= numModes; ++m) {
+                for (int Orig = 1; Orig <= numZones; ++Orig) {
+                    for (int Dest = 1; Dest <= numZones; ++Dest) {
+                        if (Orig == Dest)
+                            continue;
+                        float od_flow = MDODflow[m][Orig][Dest];
+                        if (od_flow <= 0)
+                            continue;
+                        int nRoutes = std::min(theta.size(), linkIndices[m][Orig][Dest].size());
+                        for (int route_id = 0; route_id < nRoutes; route_id++) {
+                            float routeFlow = od_flow * theta[route_id];
+                            if (linkIndices[m][Orig][Dest][route_id].empty())
+                                continue;
+                            for (int link_id : linkIndices[m][Orig][Dest][route_id]) {
+                                if (link_id >= 0 && link_id < static_cast<int>(linkFlows.size()))
+                                    linkFlows[link_id] += routeFlow;
+                            }
+                        }
+                    }
+                }
+            }
+            double totalLinkDev = 0.0;
+            int linkCount = 0;
+            for (size_t l = 0; l < linkFlows.size(); ++l) {
+                if (Link[l].Obs_volume > 1) {
+                    totalLinkDev += std::fabs(linkFlows[l] - Link[l].Obs_volume);
+                    linkCount++;
+                }
+            }
+            double avgLinkDev = (linkCount > 0 ? totalLinkDev / linkCount : 0.0);
+
+            // VMT deviation: compute total VMT and its deviation from target
+            double VMT = 0.0;
+            for (size_t l = 0; l < linkFlows.size(); ++l) {
+                VMT += linkFlows[l] * Link[l].length;
+            }
+            double vmtDev = (VMT_target > 0 ? (VMT - VMT_target) : 0.0);
+
+            logFile << "[Deviation Log] OD avg deviation = " << avgODDev
+                    << ", Link avg deviation = " << avgLinkDev
+                    << ", VMT deviation = " << vmtDev << "\n";
+        }
+
+        // Allocate a 3D structure for gradients (assumed same dimensions as MDODflow)
+        std::vector<std::vector<std::vector<double>>> gradMDOD(
+            numModes + 1,
+            std::vector<std::vector<double>>(numZones + 1, std::vector<double>(numZones + 1, 0.0))
+        );
+
+        double sumGradSq = 0.0;
+        // --- Compute gradients for each OD pair ---
+        for (int m = 1; m <= numModes; ++m) {
+            for (int Orig = 1; Orig <= numZones; ++Orig) {
+                for (int Dest = 1; Dest <= numZones; ++Dest) {
+                    if (Orig == Dest)
+                        continue;
+                    float od_flow = MDODflow[m][Orig][Dest];
+                    if (od_flow <= 0)
+                        continue;
+
+                    double grad_link = 0.0;
+                    double grad_vmt = 0.0;
+                    // For link contributions, count usage of each link for this OD pair.
+                    int routeCount = 0;
+                    std::unordered_map<int, int> linkUsage;
+                    for (int route_id = 0; route_id < static_cast<int>(linkIndices[m][Orig][Dest].size()); ++route_id) {
+                        if (linkIndices[m][Orig][Dest][route_id].empty())
+                            continue;
+                        routeCount++;
+                        for (int link_id : linkIndices[m][Orig][Dest][route_id]) {
+                            linkUsage[link_id]++;
+                        }
+                    }
+                    if (routeCount == 0)
+                        continue;
+
+                    // In this example the link and VMT gradient terms are approximated.
+                    // (Depending on your formulation, you might want to recompute the sensitivities using the updated link flows.)
+                    for (auto& entry : linkUsage) {
+                        int link_id = entry.first;
+                        int count_usage = entry.second;
+                        double sensitivity = static_cast<double>(count_usage) / routeCount;
+                        if (Link[link_id].Obs_volume > 1) {
+                            // Placeholder term if you wish to refine this component.
+                            grad_link += 2.0 * w_link * (0.0 + 0.0) * sensitivity;
+                        }
+                        if (VMT_target > 1) {
+                            // Placeholder term.
+                            grad_vmt += 2.0 * w_vmt * (0.0 + 0.0) * (Link[link_id].length * sensitivity);
+                        }
+                    }
+                    double grad_od = 2.0 * w_od * (od_flow - targetMDODflow[m][Orig][Dest]);
+                    double total_grad = grad_link + grad_vmt + grad_od;
+                    gradMDOD[m][Orig][Dest] = total_grad;
+                    sumGradSq += total_grad * total_grad;
+                }
+            }
+        }
+
+        // Check for convergence based on the norm of the gradient.
+        if (std::sqrt(sumGradSq) < tol) {
+            logFile << "Convergence reached after " << iter << " iterations.\n";
+            std::cout << "Convergence reached after " << iter << " iterations.\n";
+            break;
+        }
+
+        // --- Backtracking Line Search ---
+        double alpha = step_size;
+        // Save a copy of the current MDODflow.
+        auto oldMDODflow = MDODflow;  // assumes deep copy is available
+        // Prepare a candidate OD matrix.
+        auto candidateMDOD = oldMDODflow;
+
+        while (true) {
+            // Update candidate MDODflow: candidate = oldMDODflow - alpha * gradient.
+            for (int m = 1; m <= numModes; ++m) {
+                for (int Orig = 1; Orig <= numZones; ++Orig) {
+                    for (int Dest = 1; Dest <= numZones; ++Dest) {
+                        if (Orig == Dest)
+                            continue;
+                        candidateMDOD[m][Orig][Dest] = oldMDODflow[m][Orig][Dest] - alpha * gradMDOD[m][Orig][Dest];
+                        if (candidateMDOD[m][Orig][Dest] < 0)
+                            candidateMDOD[m][Orig][Dest] = 0; // ensure non-negativity
+                    }
+                }
+            }
+
+            double F_candidate = computeObjectiveForMDOD(candidateMDOD);
+            logFile << "[Line Search] alpha = " << alpha
+                    << " | F_candidate = " << F_candidate
+                    << " | Threshold = " << (F_current - armijo_c * alpha * sumGradSq) << "\n";
+            // Check the Armijo condition:
+            if (F_candidate <= F_current - armijo_c * alpha * sumGradSq) {
+                logFile << "[Line Search] Armijo condition met: F_candidate (" << F_candidate
+                        << ") <= F_current (" << F_current << ") - "
+                        << armijo_c << " * alpha (" << alpha << ") * sumGradSq (" << sumGradSq << ")\n";
+                break;
+            }
+            else {
+                logFile << "[Line Search] Armijo condition NOT met. Reducing alpha from " << alpha;
+                alpha *= 0.5; // reduce step size
+                logFile << " to " << alpha << "\n";
+                if (alpha < 1e-8) {  // minimal threshold to avoid endless looping
+                    logFile << "[Line Search] Alpha dropped below threshold (1e-8). Exiting line search loop.\n";
+                    break;
+                }
+            }
+        }
+        logFile << "Iteration " << iter << ": Step size chosen = " << alpha
+                << ", Objective: " << F_current << " -> " << computeObjectiveForMDOD(candidateMDOD) << "\n";
+
+        // Update MDODflow with the candidate from the line search.
+        MDODflow = candidateMDOD;
+    } // end of gradient descent loop
+
+    // --------------------------------------------------
+    // Final synchronization of path flow and link volume (unchanged)
+    std::vector<double> linkFlows(number_of_links + 1, 0.0);
+    std::vector<std::vector<double>> mode_linkFlows(numModes + 1, std::vector<double>(number_of_links + 1, 0.0));
+    for (int m = 1; m <= numModes; ++m) {
+        for (int Orig = 1; Orig <= numZones; ++Orig) {
+            for (int Dest = 1; Dest <= numZones; ++Dest) {
+                if (Orig == Dest)
+                    continue;
+                float od_flow = MDODflow[m][Orig][Dest];
+                if (od_flow <= 0)
+                    continue;
+                int nRoutes = std::min(theta.size(), linkIndices[m][Orig][Dest].size());
+                for (int route_id = 0; route_id < nRoutes; route_id++) {
+                    float routeFlow = od_flow * theta[route_id];
+                    if (linkIndices[m][Orig][Dest][route_id].empty())
+                        continue;
+                    for (int link_id : linkIndices[m][Orig][Dest][route_id]) {
+                        if (link_id >= 0 && link_id < static_cast<int>(linkFlows.size())) {
+                            linkFlows[link_id] += routeFlow;
+                            mode_linkFlows[m][link_id] += routeFlow;
+                        }
+                    }
+                }
+            }
+        }
+        for (size_t l = 0; l < linkFlows.size(); ++l) {
+            MainVolume[l] = linkFlows[l];
+            Link[l].mode_MainVolume[m] = mode_linkFlows[m][l];
+        }
+    }
+    logFile << "ODME process finished.\n";
+    logFile.close();
+}
+
+void performODME_2(std::vector<double> theta, double* MainVolume, struct link_record* Link)
+{
+	// Open log file (this will overwrite any existing file with the same name)
+	std::ofstream logFile("ODME_log.txt");
+	if (!logFile.is_open()) {
+		std::cerr << "Error: Could not open ODME_log.txt for writing." << std::endl;
+		return;
+	}
+	logFile << "Starting ODME process.\n";
+
 	// Define a target total vehicle miles travelled (VMT)
 	double VMT_target = g_ODME_obs_VMT;
 
@@ -779,7 +1097,7 @@ void performODME(std::vector<double> theta)
 	double w_vmt = g_ODME_VMT_penalty;
 
 	// Gradient descent parameters
-	double step_size = 0.001;
+	double step_size = 0.01;
 	int maxIter = 1000;
 	double tol = 1e-6;
 
@@ -791,6 +1109,8 @@ void performODME(std::vector<double> theta)
 	// Gradient descent iterations
 	for (int iter = 0; iter < maxIter; ++iter)
 	{
+		logFile << "--------------------------------------------------\n";
+		logFile << "Iteration " << iter << " begins.\n";
 		// 1. Compute link flows from OD flows using the candidate routes.
 		std::vector<double> linkFlows(number_of_links + 1, 0.0);
 
@@ -839,7 +1159,91 @@ void performODME(std::vector<double> theta)
 		{
 			VMT += linkFlows[l] * Link[l].length;
 		}
+		double total_obj_deviation = 0; 
+		double total_obj_link_deviation = 0;
+		double total_obj_od_deviation = 0;
+		double total_obj_vmt_deviation = 0;
+		logFile << "  Total VMT: " << VMT << " (Target: " << VMT_target << ")\n";
+		// When VMT_target is valid, log the deviation.
+		if (VMT_target > 0)
+		{
+			double vmtDeviation = VMT - VMT_target;
+			total_obj_deviation += vmtDeviation;
+			total_obj_vmt_deviation += vmtDeviation;
+			logFile << "  VMT Deviation: " << vmtDeviation << "\n";
+		}
 
+		// ---- Initial checking at iteration 0 ----
+	//	if (iter == 0)
+		{
+			logFile << "Deviation Checking:\n";
+			// Calculate deviations for OD demand (target vs. current)
+			double maxDemandDev = 0.0;
+			double sumDemandDev = 0.0;
+			int countOD = 0;
+			for (int m = 1; m <= numModes; ++m)
+			{
+				for (int Orig = 1; Orig <= numZones; ++Orig)
+				{
+					for (int Dest = 1; Dest <= numZones; ++Dest)
+					{
+						if (Orig == Dest)
+							continue;
+						double dev = std::fabs(MDODflow[m][Orig][Dest] - targetMDODflow[m][Orig][Dest]);
+
+						// Polished log output for this OD pair
+						logFile << "Mode " << m
+							<< ", OD pair (" << Orig << ", " << Dest << "): "
+							<< "Current OD flow = " << MDODflow[m][Orig][Dest] << ", "
+							<< "Target OD flow = " << targetMDODflow[m][Orig][Dest] << ", "
+							<< "Deviation = " << dev << ", "
+							<< "Max deviation so far = " << maxDemandDev << "\n";
+
+						maxDemandDev = std::max(maxDemandDev, dev);
+						sumDemandDev += dev;
+						total_obj_deviation += dev;
+						total_obj_od_deviation += dev;
+						countOD++;
+					}
+				}
+			}
+			double avgDemandDev = (countOD > 0) ? sumDemandDev / countOD : 0.0;
+			logFile << "  OD Demand deviations: max = " << maxDemandDev
+				<< ", average = " << avgDemandDev << "\n";
+
+			// Calculate deviations for link flows (observed vs. computed)
+			double maxLinkDev = 0.0;
+			double sumLinkDev = 0.0;
+			int countLinks = 0;
+			for (size_t l = 0; l < linkFlows.size(); ++l)
+			{
+				if(Link[l].Obs_volume>1)
+				{
+				double dev = std::fabs(linkFlows[l] - Link[l].Obs_volume);
+				maxLinkDev = std::max(maxLinkDev, dev);
+				sumLinkDev += dev;
+				total_obj_deviation += dev;
+				total_obj_link_deviation += dev;
+				logFile << "Link " << l << ": "
+					<< "Computed Flow = " << linkFlows[l] << ", "
+					<< "Observed Volume = " << Link[l].Obs_volume << ", "
+					<< "Deviation = " << dev << ", "
+					<< "Max Deviation so far = " << maxLinkDev << "\n";
+				countLinks++;
+				}
+			}
+			double avgLinkDev = (countLinks > 0) ? sumLinkDev / countLinks : 0.0;
+			logFile << "  Link flow deviations: max = " << maxLinkDev
+				<< ", average = " << avgLinkDev << "\n";
+			logFile << "### total deviations = " << total_obj_deviation << 
+				", od deviations = " << total_obj_od_deviation << 
+				", link deviations = " << total_obj_link_deviation <<
+				", vmt deviations = " << total_obj_vmt_deviation <<
+				"\n";
+
+			
+		}
+		// -------------------------------------------
 		// 3. Compute gradient for each OD pair.
 		double maxGrad = 0.0;
 		// We'll update MDODflow[m][Orig][Dest] in place.
@@ -895,9 +1299,23 @@ void performODME(std::vector<double> theta)
 
 					// Update maximum gradient (for convergence checking)
 					maxGrad = std::max(maxGrad, std::fabs(total_grad));
+					// Log detailed info for a few OD pairs if needed (optional)
+					// For example, log if the gradient is large:
+
 
 					// Update OD flow using gradient descent step.
 					MDODflow[m][Orig][Dest] -= step_size * total_grad;
+					if (std::fabs(total_grad) > 1e-3) {
+						logFile << "    [Mode " << m << " OD(" << Orig << "," << Dest << ")] "
+							<< "od_flow=" << od_flow
+							<< ", grad_link=" << grad_link
+							<< ", grad_vmt=" << grad_vmt
+							<< ", grad_od=" << grad_od
+							<< ", total_grad=" << total_grad 
+						<< ", step size=" << step_size 
+						<< ", final change size=" << (-1)*step_size * total_grad << "\n";
+					}
+
 					if (MDODflow[m][Orig][Dest] < 0)
 						MDODflow[m][Orig][Dest] = 0;
 
@@ -920,10 +1338,66 @@ void performODME(std::vector<double> theta)
 		// Check for convergence.
 		if (maxGrad < tol)
 		{
+			logFile << "Convergence reached after " << iter << " iterations.\n";
 			std::cout << "Convergence reached after " << iter << " iterations.\n";
 			break;
 		}
 	} // End of gradient descent loop
+
+	logFile << "ODME process finished.\n";
+	// at the last iteration we still need to synchronize the path flow and link volume
+			// Loop over modes and OD pairs (skip unused indices)
+
+	std::vector<double> linkFlows(number_of_links + 1, 0.0);
+	std::vector<std::vector<double>> mode_linkFlows(numModes + 1, std::vector<double>(number_of_links + 1, 0.0));
+	for (int m = 1; m <= numModes; ++m)
+	{
+
+		for (int Orig = 1; Orig <= numZones; ++Orig)
+		{
+			for (int Dest = 1; Dest <= numZones; ++Dest)
+			{
+				if (Orig == Dest) continue;
+				float od_flow = MDODflow[m][Orig][Dest];
+				if (od_flow <= 0) continue;
+
+				// Count the number of valid (non-empty) routes for this OD pair.
+				int routeCount = 0;
+				for (int route_id = 0; route_id < (int)linkIndices[m][Orig][Dest].size(); ++route_id)
+				{
+					if (!linkIndices[m][Orig][Dest][route_id].empty())
+						routeCount++;
+				}
+				if (routeCount == 0)
+					continue;
+
+				// Assume OD flow is equally split among available routes.
+				int nRoutes = std::min(theta.size(), linkIndices[m][Orig][Dest].size());
+				for (int route_id = 0; route_id < nRoutes; route_id++)
+				{
+					float routeFlow = od_flow * theta[route_id];
+
+					if (linkIndices[m][Orig][Dest][route_id].empty())
+						continue;
+					for (int link_id : linkIndices[m][Orig][Dest][route_id])
+					{
+						if (link_id >= 0 && link_id < (int)linkFlows.size())
+						{
+							linkFlows[link_id] += routeFlow;
+							mode_linkFlows[m][link_id] += routeFlow;
+						}
+					}
+				}
+			}
+
+		}
+		for (size_t l = 0; l < linkFlows.size(); ++l)
+		{
+			MainVolume[l] = linkFlows[l];
+			Link[l].mode_MainVolume[m] = mode_linkFlows[m][l];
+		}
+	}
+	logFile.close();
 }
 
 // Define a structure to hold all relevant route data.
@@ -1995,6 +2469,27 @@ int AssignmentAPI()
 	//        Link[k].Travel_time - Link[k].FreeTravelTime);
 	//}
 
+
+
+	// Compute the flow proportions (theta).
+	std::vector<double> m_theta;
+	if (m_lambda.size() == 0)
+		m_lambda.push_back(1.0);
+
+	m_theta = computeTheta(m_lambda);
+
+	if (g_ODME_mode == 1)
+		performODME(m_theta, MainVolume, Link);
+
+	OutputODPerformance("od_performance.csv");
+
+	if (shortest_path_log_flag)
+	{
+		OutputRouteDetails("route_assignment.csv", m_theta);
+		if (vehicle_log_flag)
+			OutputVehicleDetails("vehicle.csv", m_theta);
+	}
+
 	for (int k = 1; k <= number_of_links; k++)
 	{
 
@@ -2015,7 +2510,7 @@ int AssignmentAPI()
 		double avg_QVDF_period_speed = 0;
 		double IncomingDemand = 0;
 		double DOC = 0;
-		Link_QueueVDF(k, MainVolume[k], IncomingDemand, DOC, P, t0, t2, t3, vt2,  mu, Q_gamma, congestion_ref_speed, avg_queue_speed, avg_QVDF_period_speed, Severe_Congestion_P, model_speed);
+		Link_QueueVDF(k, MainVolume[k], IncomingDemand, DOC, P, t0, t2, t3, vt2, mu, Q_gamma, congestion_ref_speed, avg_queue_speed, avg_QVDF_period_speed, Severe_Congestion_P, model_speed);
 
 
 		double VMT, VHT, PMT, PHT, VHT_QVDF, PHT_QVDF;
@@ -2037,7 +2532,7 @@ int AssignmentAPI()
 		fprintf(link_performance_file, "%d,%d,%d,%d,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,",
 			iteration_no, Link[k].link_id, Link[k].external_from_node_id, Link[k].external_to_node_id,
 			MainVolume[k], Link[k].Ref_volume, Link[k].Base_volume, Link[k].Obs_volume, Link[k].Link_Capacity, IncomingDemand, DOC, Link[k].FreeTravelTime,
-			Link[k].Travel_time, Link[k].VDF_Alpha, Link[k].VDF_Beta, Link[k].VDF_plf, Link[k].length / fmax(Link[k].Travel_time / 60.0, 0.001), Link[k].length / fmax(Link[k].Travel_time / 60.0, 0.001)*1.609, Link[k].Travel_time - Link[k].FreeTravelTime);
+			Link[k].Travel_time, Link[k].VDF_Alpha, Link[k].VDF_Beta, Link[k].VDF_plf, Link[k].length / fmax(Link[k].Travel_time / 60.0, 0.001), Link[k].length / fmax(Link[k].Travel_time / 60.0, 0.001) * 1.609, Link[k].Travel_time - Link[k].FreeTravelTime);
 
 		fprintf(link_performance_file, "%2lf,%2lf,%2lf,%2lf,%2lf,%2lf,", VMT, VHT, PMT, PHT, VHT_QVDF, PHT_QVDF);
 
@@ -2048,8 +2543,8 @@ int AssignmentAPI()
 			fprintf(link_performance_file, "%2lf,", Link[k].mode_MainVolume[m]);
 
 		fprintf(link_performance_file, "%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,", P, t0, t2, t3, vt2, vt2 * 1.609, mu, Q_gamma,
-			Link[k].free_speed, Link[k].Cutoff_Speed, Link[k].free_speed*1.609, Link[k].Cutoff_Speed * 1.609,
-			congestion_ref_speed, avg_queue_speed, avg_QVDF_period_speed, 
+			Link[k].free_speed, Link[k].Cutoff_Speed, Link[k].free_speed * 1.609, Link[k].Cutoff_Speed * 1.609,
+			congestion_ref_speed, avg_queue_speed, avg_QVDF_period_speed,
 			congestion_ref_speed * 1.609, avg_queue_speed * 1.609, avg_QVDF_period_speed * 1.609,
 			Link[k].QVDF_TT, Severe_Congestion_P);
 		for (int t = demand_period_starting_hours * 60; t < demand_period_ending_hours * 60; t += 5)
@@ -2064,25 +2559,6 @@ int AssignmentAPI()
 		fprintf(link_performance_file, "\n");
 	}
 
-
-	// Compute the flow proportions (theta).
-	std::vector<double> m_theta;
-	if (m_lambda.size() == 0)
-		m_lambda.push_back(1.0);
-
-	m_theta = computeTheta(m_lambda);
-
-	if (g_ODME_mode == 1)
-		performODME(m_theta);
-
-	OutputODPerformance("od_performance.csv");
-
-	if (shortest_path_log_flag)
-	{
-		OutputRouteDetails("route_assignment.csv", m_theta);
-		if (vehicle_log_flag)
-			OutputVehicleDetails("vehicle.csv", m_theta);
-	}
 	free(MainVolume);
 	free(SubVolume);
 	free(SDVolume);
