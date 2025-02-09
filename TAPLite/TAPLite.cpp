@@ -42,7 +42,7 @@ using namespace std;
 
 typedef double cost_vector[NO_COSTPARAMETERS];
 
-#ifndef _win32
+#ifndef _WIN32
 void fopen_s(FILE** file, const char* fileName, const char* mode)
 {
    *file = fopen(fileName, mode);
