@@ -1,5 +1,3 @@
-#pragma once
-
 #ifndef GUARD_PATH_ENGINE_H
 #define GUARD_PATH_ENGINE_H
 

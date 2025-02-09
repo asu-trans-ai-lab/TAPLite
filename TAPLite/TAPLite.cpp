@@ -39,12 +39,12 @@
 using namespace std;
 #define MAX_MODE_TYPES  10
 
-//#ifndef _win32
-//void fopen_s(FILE** file, const char* fileName, const char* mode)
-//{
-//    *file = fopen(fileName, mode);
-//}
-//#endif
+#ifndef _win32
+void fopen_s(FILE** file, const char* fileName, const char* mode)
+{
+   *file = fopen(fileName, mode);
+}
+#endif
 
 typedef double cost_vector[NO_COSTPARAMETERS];
 
@@ -166,7 +166,7 @@ mode_type g_mode_type_vector[MAX_MODE_TYPES];
 int g_metric_system_flag = 0; 
 void StatusMessage(const char* group, const char* format, ...);
 void ExitMessage(const char* format, ...);
-#include "TAPlite.h"
+#include "TAPLite.h"
 
 struct link_record* Link;
 int* FirstLinkFrom;  // used in shortet path algorithm 
@@ -800,7 +800,7 @@ void performODME(std::vector<double> theta, double* MainVolume, struct link_reco
     //   - OD demand deviations: w_od * (MDODflow - targetMDODflow)^2,
     //   - Link flow deviations: w_link * (linkFlow - Link[l].Obs_volume)^2,
     //   - VMT deviations: w_vmt * (VMT - VMT_target)^2.
-    auto computeObjectiveForMDOD = [&](const auto& mdod) -> double {
+    auto computeObjectiveForMDOD = [&](double*** mdod) -> double {
         // Compute link flows from the given OD matrix "mdod"
         std::vector<double> linkFlows(number_of_links + 1, 0.0);
         for (int m = 1; m <= numModes; ++m) {
