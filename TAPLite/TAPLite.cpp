@@ -25,6 +25,8 @@
 #include "TAPLite.h"
 
 #include <cstdio>
+#include <cmath>
+#include <memory>
 #include <fstream>
 #include <iostream>
 #include <map>
