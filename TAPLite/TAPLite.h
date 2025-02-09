@@ -8,11 +8,22 @@
 #endif
 
 extern "C" PATH_ENGINE_API void DTALiteAPI();
-#endif
 
 #define BUFFERSIZE 1000
 #define MAX_NO_BISECTITERATION 5 /* Avoids infinite loops */
 
+#include <fstream>
+#include <map>
+#include <string>
+#include <sstream>
+#include <vector>
+
+static int MinLineSearchIterations = 5;
+static int ActualIterations = 0;
+static double LastLambda = 1.0;
+
+std::map<int, int> g_map_external_node_id_2_node_seq_no;
+std::map<int, int> g_map_node_seq_no_2_external_node_id;
 
 class CDTACSVParser {
 public:
@@ -342,13 +353,17 @@ bool CDTACSVParser::GetValueByFieldName(std::string field_name,
     }
 }
 
-std::map<int, int> g_map_external_node_id_2_node_seq_no;
-std::map<int, int> g_map_node_seq_no_2_external_node_id;
+void ExitMessage(const char* format, ...)
+{
+	va_list ap;
 
+	// vprintf(format, ap);
+	printf("\n");
 
-static int MinLineSearchIterations = 5;
-static int ActualIterations = 0;
-static double LastLambda = 1.0;
+	getchar();
+
+	exit(EXIT_FAILURE);
+}
 
 // Function to allocate a 1D array
 void* Alloc_1D(int dim1, size_t size) {
@@ -443,3 +458,5 @@ struct CLink {
     double capacity;
     int free_speed;
 };
+
+#endif

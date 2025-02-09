@@ -13,15 +13,16 @@
 #define OVTT 1
 #define MONETARY 2
 #define DIST 3
+#define INVALID -1
+#define MAX_MODE_TYPES  10
 
 #define MIN(x, y) (((x) < (y)) ? (x) : (y))
 #define MAX(x, y) (((x) > (y)) ? (x) : (y))
 #define SQR(x) ((x) * (x))
 #define FABS(x) ((x) >= 0 ? (x) : (-x))
-
-#define INVALID -1
-
 #define VALID(x) ((x) != -1)
+
+#include "TAPLite.h"
 
 #include <cstdio>
 #include <fstream>
@@ -35,9 +36,11 @@
 #include <chrono>  // for high_resolution_clock
 #include <deque>
 #include <iomanip> // For std::setw and std::setfill
+#include <unordered_map>  // For hash table (unordered_map)
 
 using namespace std;
-#define MAX_MODE_TYPES  10
+
+typedef double cost_vector[NO_COSTPARAMETERS];
 
 #ifndef _win32
 void fopen_s(FILE** file, const char* fileName, const char* mode)
@@ -45,8 +48,6 @@ void fopen_s(FILE** file, const char* fileName, const char* mode)
    *file = fopen(fileName, mode);
 }
 #endif
-
-typedef double cost_vector[NO_COSTPARAMETERS];
 
 struct link_record {
 	int internal_from_node_id;
@@ -165,8 +166,6 @@ struct mode_type {
 mode_type g_mode_type_vector[MAX_MODE_TYPES];
 int g_metric_system_flag = 0; 
 void StatusMessage(const char* group, const char* format, ...);
-void ExitMessage(const char* format, ...);
-#include "TAPLite.h"
 
 struct link_record* Link;
 int* FirstLinkFrom;  // used in shortet path algorithm 
@@ -379,9 +378,6 @@ int g_number_of_processors = 4;
 
 double FindMinCostRoutes(int*** MinPathPredLink)
 {
-
-
-
 	double** CostTo;
 
 	CostTo = (double**)Alloc_2D(no_zones, no_nodes, sizeof(double));
@@ -733,20 +729,6 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
 	printf("All or nothing assignment: %lld hours %lld minutes %lld seconds %lld ms\n", hours.count(), minutes.count(), seconds.count(), milliseconds.count());
 
 }
-
-
-
-
-#include <fstream>  // for file output
-
-#include <unordered_map>  // For hash table (unordered_map)
-#include <fstream>        // For file output
-#include <string>
-#include <vector>
-#include <iostream>
-
-// Hash table to store unique (node sum, link sum) combinations
-
 
 //---------------------------------------------------------------------------
 // ODME via Gradient Descent
@@ -3590,18 +3572,6 @@ int Read_ODflow(double* TotalODflow, int* number_of_modes, int* no_zones)
 
 }
 
-void ExitMessage(const char* format, ...)
-{
-	va_list ap;
-
-	// vprintf(format, ap);
-	printf("\n");
-
-	getchar();
-
-	exit(EXIT_FAILURE);
-}
-
 void CloseLinks(void)
 {
 	int Node;
@@ -3611,7 +3581,6 @@ void CloseLinks(void)
 	free(LastLinkFrom);
 
 }
-
 
 double LinksSDLineSearch(double* MainVolume, double* SDVolume) {
 	int n;
