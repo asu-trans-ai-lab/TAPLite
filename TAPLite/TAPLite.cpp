@@ -1,4 +1,4 @@
-// TAPLite.cpp : This file contains the 'main' function. Program execution begins and ends here.
+﻿// TAPLite.cpp : This file contains the 'main' function. Program execution begins and ends here.
 
 // This code is built based on the implementation available at:
 // http://www.bgu.ac.il/~bargera/tntp/FW.zip
@@ -2637,8 +2637,14 @@ void ReadLinks()
 			if (g_metric_system_flag == 1)
 				free_speed = free_speed / 1.609;
 
-			if (lanes <= 0 || capacity < 0.0001 || free_speed < 0.0001)
-				continue; 
+			if (lanes <= 0 || capacity < 0.0001 || free_speed < 0.0001) {
+				std::cerr << "Error: Invalid link attributes detected. "
+					<< "lanes = " << lanes
+					<< ", capacity = " << capacity
+					<< ", free_speed = " << free_speed
+					<< ". Skipping this link." << std::endl;
+				continue;
+			}
 
 
 			Link[k].setup(number_of_modes);
@@ -4467,9 +4473,461 @@ int SimulationAPI()
 	return 0;
 }
 
+
+//// map_matching.cpp
+//#include <cmath>
+//#include <algorithm>
+//#include <vector>
+//#include <map>
+//#include <string>
+//#include <iostream>
+//#include <cstdio>
+//#include <cstdlib>
+
+namespace MapMatching {
+
+	// Constants
+	constexpr double PI = 3.141592653589793;
+	constexpr double EARTH_RADIUS = 6371000; // in meters
+	constexpr double DEFAULT_GRID_RESOLUTION = 0.01; // adjust as needed
+
+	// ---------------------------------------------------------
+	// Geometry Utilities
+	// ---------------------------------------------------------
+	inline double toRadians(double degrees) {
+		return degrees * PI / 180.0;
+	}
+
+	// Haversine distance (meters) given two lat/lon pairs.
+	double haversineDistance(double lat1, double lon1, double lat2, double lon2) {
+		lat1 = toRadians(lat1); lon1 = toRadians(lon1);
+		lat2 = toRadians(lat2); lon2 = toRadians(lon2);
+		double dlat = lat2 - lat1;
+		double dlon = lon2 - lon1;
+		double a = std::pow(std::sin(dlat / 2), 2) +
+			std::cos(lat1) * std::cos(lat2) * std::pow(std::sin(dlon / 2), 2);
+		double c = 2 * std::atan2(std::sqrt(a), std::sqrt(1 - a));
+		return EARTH_RADIUS * c;
+	}
+
+	// A simple point structure.
+	struct GDPoint {
+		double x, y;
+	};
+
+	// Euclidean (L2) distance between two points.
+	inline double getEuclideanDistance(const GDPoint* p1, const GDPoint* p2) {
+		return std::sqrt(std::pow(p1->x - p2->x, 2) + std::pow(p1->y - p2->y, 2));
+	}
+
+	// Compute distance from a point to a line segment [fromPt, toPt].
+	double getPointToLineDistance(const GDPoint* pt,
+		const GDPoint* fromPt,
+		const GDPoint* toPt,
+		double unitGridRes,
+		bool no_intersection_requirement)
+	{
+		double lineLength = getEuclideanDistance(fromPt, toPt);
+		if (lineLength < 1e-6)
+			return getEuclideanDistance(pt, fromPt);
+		double U = ((pt->x - toPt->x) * (fromPt->x - toPt->x) +
+			(pt->y - toPt->y) * (fromPt->y - toPt->y))
+			/ (lineLength * lineLength);
+		if (!no_intersection_requirement && (U < 0.0 || U > 1.0))
+			return unitGridRes; // fallback value
+		GDPoint intersection;
+		intersection.x = toPt->x + U * (fromPt->x - toPt->x);
+		intersection.y = toPt->y + U * (fromPt->y - toPt->y);
+		double d1 = getEuclideanDistance(pt, &intersection);
+		double d0 = getEuclideanDistance(pt, fromPt);
+		double d2 = getEuclideanDistance(pt, toPt);
+		return no_intersection_requirement ? std::min({ d1, d0, d2 }) : d1;
+	}
+
+	// ---------------------------------------------------------
+	// Data Structures for MMLinks and GPS Points.
+	// ---------------------------------------------------------
+	// A link (named MMLink) is defined by its two endpoints.
+	struct MMLink {
+		GDPoint fromPt;
+		GDPoint toPt;
+		double link_distance; // precomputed total length
+		bool bInsideFlag;     // true if the link is within a grid cell with GPS points
+		double likelihood_distance; // computed matching cost
+		int likely_trace_no;        // matching GPS trace id
+		int hit_count;              // count of “hits” from intersection tests
+		MMLink(const GDPoint& f, const GDPoint& t)
+			: fromPt(f), toPt(t),
+			link_distance(getEuclideanDistance(&f, &t)),
+			bInsideFlag(false),
+			likelihood_distance(1e9),
+			likely_trace_no(-1),
+			hit_count(0) {}
+	};
+
+	// A GPS trace point.
+	struct GPSPoint {
+		GDPoint pt;
+		int trace_no;
+		int global_time;   // in seconds
+		GPSPoint() : trace_no(0), global_time(0) {}
+	};
+
+	// ---------------------------------------------------------
+	// Grid Cell for Matching.
+	// ---------------------------------------------------------
+	struct GridCell {
+		double x, y;  // cell origin (e.g., lower-left)
+		std::vector<int> linkIndices; // indices of MMLinks overlapping this cell
+		std::vector<GPSPoint> gpsPoints; // GPS points falling in this cell
+		bool dwell_flag = false;
+		float start_min = 1e9; // earliest GPS time (minutes) in cell
+		float end_min = 0;     // latest GPS time (minutes)
+		float dwell_time = 0;  // computed dwell time (minutes)
+	};
+
+	// ---------------------------------------------------------
+	// MatchingGrid: builds a grid for MMLinks, marks visited cells from GPS traces,
+	// and processes each cell to compute a matching cost.
+	// ---------------------------------------------------------
+	class MatchingGrid {
+	public:
+		MatchingGrid(double left, double right, double bottom, double top, double gridRes = DEFAULT_GRID_RESOLUTION)
+			: left_(left), right_(right), bottom_(bottom), top_(top), gridRes_(gridRes)
+		{
+			cols_ = static_cast<int>(std::ceil((right_ - left_) / gridRes_)) + 1;
+			rows_ = static_cast<int>(std::ceil((top_ - bottom_) / gridRes_)) + 1;
+			grid_.resize(rows_, std::vector<GridCell>(cols_));
+			for (int r = 0; r < rows_; ++r)
+				for (int c = 0; c < cols_; ++c) {
+					grid_[r][c].x = left_ + c * gridRes_;
+					grid_[r][c].y = bottom_ + r * gridRes_;
+				}
+		}
+
+		// Insert a MMLink into every cell overlapping its bounding box.
+		void insertLink(int linkIndex, const GDPoint& fromPt, const GDPoint& toPt) {
+			double minX = std::min(fromPt.x, toPt.x);
+			double maxX = std::max(fromPt.x, toPt.x);
+			double minY = std::min(fromPt.y, toPt.y);
+			double maxY = std::max(fromPt.y, toPt.y);
+			int colStart = getColIndex(minX);
+			int colEnd = getColIndex(maxX);
+			int rowStart = getRowIndex(minY);
+			int rowEnd = getRowIndex(maxY);
+			for (int r = rowStart; r <= rowEnd; ++r)
+				for (int c = colStart; c <= colEnd; ++c)
+					if (isValidCell(r, c))
+						grid_[r][c].linkIndices.push_back(linkIndex);
+		}
+
+		// Insert a GPS point and update the cell's time bounds.
+		void insertGPSPoint(const GPSPoint& gps, const GDPoint& pt) {
+			int r = getRowIndex(pt.y);
+			int c = getColIndex(pt.x);
+			if (isValidCell(r, c)) {
+				grid_[r][c].gpsPoints.push_back(gps);
+				float timeMin = gps.global_time / 60.0f;
+				grid_[r][c].start_min = std::min(grid_[r][c].start_min, timeMin);
+				grid_[r][c].end_min = std::max(grid_[r][c].end_min, timeMin);
+			}
+		}
+
+		// Process visited cells:
+		// 1) Mark dwell cells (if time span > 120 minutes).
+		// 2) For each link in a cell, loop over GPS points and update a matching cost.
+		// 3) For links with no matching GPS point, assign the closest one.
+		void processCells(const std::vector<MMLink>& links,
+			std::vector<double>& linkGeneralCost,
+			std::vector<int>& linkMatchingTraceNo,
+			double nonHitDistanceRatio = 10.0)
+		{
+			// First pass: mark dwell cells.
+			for (int r = 0; r < rows_; ++r) {
+				for (int c = 0; c < cols_; ++c) {
+					GridCell& cell = grid_[r][c];
+					if (!cell.gpsPoints.empty() && (cell.end_min - cell.start_min > 120)) {
+						cell.dwell_flag = true;
+						cell.dwell_time = cell.end_min - cell.start_min;
+					}
+				}
+			}
+			// Second pass: update link cost from GPS points.
+			for (int r = 0; r < rows_; ++r) {
+				for (int c = 0; c < cols_; ++c) {
+					GridCell& cell = grid_[r][c];
+					if (!cell.gpsPoints.empty() && !cell.linkIndices.empty()) {
+						// Initialize each link’s cost to the grid resolution.
+						for (int linkIdx : cell.linkIndices)
+							linkGeneralCost[linkIdx] = gridRes_;
+						// For each GPS point…
+						for (const auto& gps : cell.gpsPoints) {
+							for (int linkIdx : cell.linkIndices) {
+								const MMLink& L = links[linkIdx];
+								double d = getPointToLineDistance(&gps.pt, &L.fromPt, &L.toPt, 1.0, true);
+								double cost = d; // Here, you might combine with other measures.
+								if (cost < linkGeneralCost[linkIdx]) {
+									linkGeneralCost[linkIdx] = cost;
+									linkMatchingTraceNo[linkIdx] = gps.trace_no;
+								}
+							}
+						}
+						// Stage 2: for links with no matching GPS point, find the closest one.
+						for (int linkIdx : cell.linkIndices) {
+							if (linkMatchingTraceNo[linkIdx] < 0) {
+								double min_d = 1e9;
+								int bestTrace = -1;
+								for (const auto& gps : cell.gpsPoints) {
+									double d = getPointToLineDistance(&gps.pt, &links[linkIdx].fromPt, &links[linkIdx].toPt, 1.0, false);
+									if (d < min_d) { min_d = d; bestTrace = gps.trace_no; }
+								}
+								linkMatchingTraceNo[linkIdx] = bestTrace;
+							}
+						}
+					}
+				}
+			}
+		}
+
+		void printSummary() const {
+			std::cout << "MatchingGrid: " << rows_ << " rows x " << cols_ << " cols, resolution "
+				<< gridRes_ << "\n";
+			std::cout << "Bounds: x[" << left_ << ", " << right_ << "], y[" << bottom_ << ", " << top_ << "]\n";
+		}
+
+	private:
+		int getColIndex(double x) const { return static_cast<int>((x - left_) / gridRes_); }
+		int getRowIndex(double y) const { return static_cast<int>((y - bottom_) / gridRes_); }
+		bool isValidCell(int r, int c) const { return r >= 0 && r < rows_ && c >= 0 && c < cols_; }
+		double left_, right_, bottom_, top_, gridRes_;
+		int rows_, cols_;
+		std::vector<std::vector<GridCell>> grid_;
+	};
+
+	// Define a structure to hold trace record information.
+	struct TraceRecord {
+		int trace_no = 0;
+		std::string trace_id = "";
+		std::string allowed_link_type_code = "";
+		std::string blocked_link_type_code = "";
+		double y_coord = 0.0;
+		double x_coord = 0.0;
+		int road_order = 0;
+		double reference_speed = 0.0;
+		std::string agent_id = "";
+		int internal_road_order = 0;
+		int o_node_id = -1;
+		int d_node_id = -1;
+	};
+
+	// Here we change the parameter to a nested map:
+	// Outer key: agent_id (std::string)
+	// Inner key: trace_no (int)
+	// Value: vector of GPSPoints that belong to that trace.
+	int readGPSTraceFile(std::unordered_map<std::string, std::unordered_map<int, std::vector<GPSPoint>>>& gpsTraces)
+	{
+		CDTACSVParser parser_trace;
+		std::vector<TraceRecord> traceRecords;
+
+		// Open the CSV file (the second parameter 'true' indicates that the file contains headers)
+		if (parser_trace.OpenCSVFile("trace.csv", true))
+		{
+			// Read each record until end-of-file.
+			while (parser_trace.ReadRecord())
+			{
+				TraceRecord rec;
+				// Read the fields by name.
+				parser_trace.GetValueByFieldName("trace_no", rec.trace_no);
+				parser_trace.GetValueByFieldName("trace_id", rec.trace_id);
+				parser_trace.GetValueByFieldName("allowed_link_type_code", rec.allowed_link_type_code);
+				parser_trace.GetValueByFieldName("blocked_link_type_code", rec.blocked_link_type_code);
+				parser_trace.GetValueByFieldName("y_coord", rec.y_coord);
+				parser_trace.GetValueByFieldName("x_coord", rec.x_coord);
+				parser_trace.GetValueByFieldName("road_order", rec.road_order);
+				parser_trace.GetValueByFieldName("reference_speed", rec.reference_speed);
+				parser_trace.GetValueByFieldName("agent_id", rec.agent_id);
+				parser_trace.GetValueByFieldName("internal_road_order", rec.internal_road_order);
+				parser_trace.GetValueByFieldName("o_node_id", rec.o_node_id);
+				parser_trace.GetValueByFieldName("d_node_id", rec.d_node_id);
+
+				traceRecords.push_back(rec);
+			}
+			parser_trace.CloseCSVFile();
+		}
+		else
+		{
+			std::cerr << "Error: Cannot open trace.csv" << std::endl;
+			std::exit(1);
+		}
+
+		// Group the GPS traces by agent_id and trace_no
+		for (const auto& rec : traceRecords)
+		{
+			GPSPoint gps;
+			gps.pt.x = rec.x_coord;
+			gps.pt.y = rec.y_coord;
+			gps.trace_no = rec.trace_no;
+			// If you have a global_time field in your CSV, you can set gps.global_time here.
+
+			// Group by agent_id then trace_no:
+			gpsTraces[rec.agent_id][rec.trace_no].push_back(gps);
+		}
+
+		return 0;
+	}
+} // end namespace MapMatching
+
+
+
+// -------------------------
+// -------------------------
+// Example main() demonstrating advanced grid-based matching using MMLink
+// -------------------------
+int mapmatchingAPI() {
+
+
+	fopen_s(&summary_log_file, "summary_log_file.txt", "w");
+	double* MainVolume, * SubVolume, * SDVolume, Lambda;
+	int*** MDMinPathPredLink;
+
+	read_settings_file();
+	read_mode_type_file();
+	fopen_s(&logfile, "TAP_log.csv", "w");  // Open the log file for writing.
+	no_nodes = get_number_of_nodes_from_node_file(no_zones, FirstThruNode);
+	number_of_links = get_number_of_links_from_link_file();
+
+	printf("# of nodes= %d, largest zone id = %d, First Through Node (Seq No) = %d, number of links = %d\n", no_nodes, no_zones,
+		FirstThruNode, number_of_links);
+
+	fprintf(summary_log_file, "no_nodes= %d, no_zones = %d, FirstThruNode (seq No) = %d, number_of_links = %d\n", no_nodes, no_zones,
+		FirstThruNode, number_of_links);
+
+
+	double system_wide_travel_time = 0;
+	double system_least_travel_time = 0;
+
+	//fprintf(logfile,
+	//    "iteration_no,link_id,internal_from_node_id,internal_to_node_id,volume,capacity,voc,"
+	//    "fftt,travel_time,delay\n");
+
+
+
+	//Init(number_of_modes, no_zones);
+
+	InitLinks();
+	MDMinPathPredLink = (int***)Alloc_3D(number_of_modes, no_zones, no_nodes, sizeof(int)); 
+
+	double** CostTo;
+
+	CostTo = (double**)Alloc_2D(no_zones, no_nodes, sizeof(double));
+	using namespace MapMatching;
+
+	// Create some MMLinks.
+	std::vector<MMLink> mmLinks;
+
+	for (int k = 1; k <= number_of_links; k++)
+	{
+		double from_x, from_y, to_x, to_y; 
+		from_x = g_node_vector[Link[k].internal_from_node_id].x;
+		from_y = g_node_vector[Link[k].internal_to_node_id].y;
+		to_x = g_node_vector[Link[k].internal_from_node_id].x;
+		to_y = g_node_vector[Link[k].internal_to_node_id].y;
+
+		mmLinks.push_back(MMLink({ from_x, from_y }, { to_x, to_y }));
+	}
+
+
+
+	// Compute overall boundaries from all MMLink endpoints.
+	double left = 1e9, right = -1e9, bottom = 1e9, top = -1e9;
+	for (const auto& L : mmLinks) {
+		left = std::min({ left, L.fromPt.x, L.toPt.x });
+		right = std::max({ right, L.fromPt.x, L.toPt.x });
+		bottom = std::min({ bottom, L.fromPt.y, L.toPt.y });
+		top = std::max({ top, L.fromPt.y, L.toPt.y });
+	}
+
+	// Build the matching grid.
+	MatchingGrid mGrid(left, right, bottom, top, DEFAULT_GRID_RESOLUTION);
+	mGrid.printSummary();
+	for (size_t i = 0; i < mmLinks.size(); i++) {
+		mGrid.insertLink(static_cast<int>(i), mmLinks[i].fromPt, mmLinks[i].toPt);
+	}
+	std::unordered_map<std::string, std::unordered_map<int, std::vector<GPSPoint>>> gpsTraces;
+	readGPSTraceFile(gpsTraces);
+
+	// ------------------------
+	// Insert GPS points into the grid.
+	// ------------------------
+	// Loop over each agent and then each trace for that agent.
+	for (const auto& agentPair : gpsTraces) {
+		const std::string& agentId = agentPair.first;
+
+
+		const auto& tracesMap = agentPair.second;
+		for (const auto& tracePair : tracesMap) {
+			int traceNo = tracePair.first;
+			const std::vector<GPSPoint>& gpsPoints = tracePair.second;
+			// Optionally, you might want to print or log the agent and trace information:
+			// std::cout << "Processing agent " << agentId << ", trace " << traceNo << std::endl;
+			for (const auto& gps : gpsPoints) {
+				mGrid.insertGPSPoint(gps, gps.pt);
+			}
+		}
+
+
+	// ------------------------
+	// Prepare arrays for each MMLink’s cost and matching trace number.
+	// ------------------------
+	std::vector<double> linkGeneralCost(mmLinks.size(), DEFAULT_GRID_RESOLUTION);
+	std::vector<int>    linkMatchingTraceNo(mmLinks.size(), -1);
+
+	// Process the grid cells.
+	mGrid.processCells(mmLinks, linkGeneralCost, linkMatchingTraceNo);
+
+	// Print the matching cost for each MMLink.
+	for (size_t i = 0; i < mmLinks.size(); ++i) {
+		std::printf("MMLink %zu: cost = %.3f, matched trace = %d\n",
+			i, linkGeneralCost[i], linkMatchingTraceNo[i]);
+	}
+
+
+	StatusMessage("Minpath", "Starting the minpath calculations.");
+
+	const std::vector<GPSPoint>& gpsPoints = tracesMap;
+//#pragma omp parallel for
+		int Orig = agentPair.second.;  // get origin zone id
+
+		int m = 0;
+			Minpath(m, Orig, MDMinPathPredLink[m][Orig], CostTo[Orig]);
+			if (MDRouteCost != NULL)
+			{
+				int Dest = 1; 
+
+						// CostTo is coded as internal node id 
+				int  internal_node_id_for_destination_zone  = g_map_external_node_id_2_node_seq_no[Dest]; 
+
+					if (CostTo[Orig][internal_node_id_for_destination_zone] <= BIGM - 1)  // feasible cost 
+						{
+							MDRouteCost[m][Orig][Dest] = CostTo[Orig][internal_node_id_for_destination_zone];
+
+						}
+					}
+	}
+
+
+
+	
+	Free_3D((void***)MDMinPathPredLink, number_of_modes, no_zones, no_nodes); 
+	Free_2D((void**)CostTo, no_zones, no_nodes);
+	return 0;
+}
+
 int main()
 {
-	AssignmentAPI();
+	mapmatchingAPI();
+	//
+	//AssignmentAPI();
 	//SimulationAPI();
 }
 
