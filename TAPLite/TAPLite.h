@@ -9,9 +9,6 @@
 
 extern "C" PATH_ENGINE_API void DTALiteAPI();
 
-#define BUFFERSIZE 1000
-#define MAX_NO_BISECTITERATION 5 /* Avoids infinite loops */
-
 #include <fstream>
 #include <map>
 #include <string>

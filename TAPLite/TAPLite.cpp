@@ -7,20 +7,11 @@
 // The enhanced C++ counterpart has served as the path engine for Path4GMNS and TransOMS.
 // https://github.com/jdlph/TAP101
 
-#define FLOAT_ACCURACY 1.0E-15
-#define NO_COSTPARAMETERS 4
-#define IVTT 0
-#define OVTT 1
-#define MONETARY 2
-#define DIST 3
-#define INVALID -1
+#define BIGM 9999999      /* Represents an invalid value. */
+#define INVALID -1      /* Represents an invalid value. */
 #define MAX_MODE_TYPES  10
-
-#define MIN(x, y) (((x) < (y)) ? (x) : (y))
-#define MAX(x, y) (((x) > (y)) ? (x) : (y))
-#define SQR(x) ((x) * (x))
-#define FABS(x) ((x) >= 0 ? (x) : (-x))
-#define VALID(x) ((x) != -1)
+#define MAX_NO_BISECTITERATION 5 /* Avoids infinite loops */
+#define WAS_IN_QUEUE -7 /* Shows that the node was in the queue before. (7 is for luck.) */
 
 #include "TAPLite.h"
 
@@ -41,8 +32,6 @@
 #include <unordered_map>  // For hash table (unordered_map)
 
 using namespace std;
-
-typedef double cost_vector[NO_COSTPARAMETERS];
 
 #ifndef _WIN32
 void fopen_s(FILE** file, const char* fileName, const char* mode)
@@ -170,8 +159,11 @@ int g_metric_system_flag = 0;
 void StatusMessage(const char* group, const char* format, ...);
 
 struct link_record* Link;
-int* FirstLinkFrom;  // used in shortet path algorithm 
+int* FirstLinkFrom;  // used in shortest path algorithm 
 int* LastLinkFrom;
+FILE* summary_log_file;
+FILE* link_performance_file;
+FILE* logfile;
 
 
 double Link_GenCost(int k, double* Volume);
@@ -213,7 +205,7 @@ void All_or_Nothing_Assign(double** ODflow, int** MinPathPredLink, double* Volum
 double LinksSDLineSearch(double* MainVolume, double* SDVolume);
 
 
-/* Gloabal variables */
+/* Global variables */
 
 int no_zones, number_of_modes, no_nodes, number_of_links, FirstThruNode;
 int TotalAssignIterations = 20;
@@ -228,7 +220,6 @@ double g_System_VMT = 0;
 double g_ODME_link_volume_penalty = 0.1;  // relative weight on volume , convert the deviation of link volume to the travel time 
 double g_ODME_VMT_penalty = 1e-6;  // relative weight on VMT , convert the deviation of VMT to the travel time 
 double g_ODME_od_penalty = 0.01;  // relative weight on od , 
-FILE* summary_log_file;
 
 
 double** ODflow, TotalODflow;
@@ -240,6 +231,7 @@ double*** MDDiffODflow;  // D^c - D^b
 double*** targetMDODflow; // for ODME
 
 double*** MDRouteCost;
+
 /* Local Declarations */
 /* void FW(void); Should there be a function for fw, or should it be included in main? */
 static void Init(int input_number_of_modes, int input_no_zones);
@@ -248,17 +240,10 @@ static void InitODflow(int input_number_of_modes, int input_no_zones);
 static void CloseODflow(void);
 /* End of local declarations. */
 
-FILE* logfile;
 int shortest_path_log_flag = 0;
 int vehicle_log_flag = 0;
 int baseODDemand_loaded_flag = 0;
 int baselinkvolume_loaded_flag = 0;
-
-FILE* link_performance_file;
-
-#define INVALID -1      /* Represents an invalid value. */
-#define BIGM 9999999      /* Represents an invalid value. */
-#define WAS_IN_QUEUE -7 /* Shows that the node was in the queue before. (7 is for luck.) */
 
 double Link_QueueVDF(int k, double Volume, double& IncomingDemand, double& DOC, double& P, double& t0, double& t2, double& t3, double& vt2, double& Q_mu, double& Q_gamma, double& congestion_ref_speed,
 	double& avg_queue_speed, double& avg_QVDF_period_speed, double& Severe_Congestion_P, double model_speed[300]);
@@ -2204,7 +2189,7 @@ void InitializeLinkIndices(int num_modes, int no_zones, int max_routes)
 	auto seconds = std::chrono::duration_cast<std::chrono::seconds>(duration % std::chrono::minutes(1));
 	auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(duration % std::chrono::seconds(1));
 
-	printf("Memmory creation time for 5D link path matrix: %lld hours %lld minutes %lld seconds %lld ms\n", hours.count(), minutes.count(), seconds.count(), milliseconds.count());
+	printf("Memory creation time for 5D link path matrix: %lld hours %lld minutes %lld seconds %lld ms\n", hours.count(), minutes.count(), seconds.count(), milliseconds.count());
 }
 
 int AssignmentAPI()
