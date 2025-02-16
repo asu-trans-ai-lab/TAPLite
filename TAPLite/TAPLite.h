@@ -1,13 +1,13 @@
-#ifndef GUARD_PATH_ENGINE_H
-#define GUARD_PATH_ENGINE_H
+#ifndef GUARD_TAPLITE_H
+#define GUARD_TAPLITE_H
 
 #ifdef _WIN32
-#define PATH_ENGINE_API __declspec(dllexport)
+#define TAPLITE_API __declspec(dllexport)
 #else
-#define PATH_ENGINE_API
+#define TAPLITE_API
 #endif
 
-extern "C" PATH_ENGINE_API void DTALiteAPI();
+extern "C" TAPLITE_API void DTALiteAPI();
 
 #include <fstream>
 #include <map>
