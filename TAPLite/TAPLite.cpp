@@ -201,10 +201,12 @@ int g_ODME_mode = 0;
 double g_ODME_obs_VMT = -1;
 double g_System_VMT = 0;
 
-double g_ODME_link_volume_penalty =
-    0.1;                          // relative weight on volume , convert the deviation of link volume to the travel time
-double g_ODME_VMT_penalty = 1e-6; // relative weight on VMT , convert the deviation of VMT to the travel time
-double g_ODME_od_penalty = 0.01;  // relative weight on od ,
+// relative weight on volume , convert the deviation of link volume to the travel time
+double g_ODME_link_volume_penalty = 0.1;  
+// relative weight on VMT , convert the deviation of VMT to the travel time                        
+double g_ODME_VMT_penalty = 1e-6; 
+// relative weight on od
+double g_ODME_od_penalty = 0.01;  
 
 double **ODflow, TotalODflow;
 double* TotalOFlow;
@@ -547,17 +549,13 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
                     }
 
                     CurrentNode = Dest;
-                    CurrentNode = g_map_external_node_id_2_node_seq_no
-                        [Dest]; // mapping from external  zone id of Dest (which is defined in demand.csv_ to the
-                                // corresponding node id (== zone_id) and then to the node internal number
-                    int internal_node_for_origin_node = g_map_external_node_id_2_node_seq_no
-                        [Orig]; // mapping from external  zone id of Orig (which is defined in demand.csv_ to the
-                                // corresponding node id (== zone_id) and then to the node internal number
+					// mapping from external  zone id of Dest (which is defined in demand.csv_ to the
+                    // corresponding node id (== zone_id) and then to the node internal number
+                    CurrentNode = g_map_external_node_id_2_node_seq_no[Dest]; 
+					// mapping from external  zone id of Orig (which is defined in demand.csv_ to the
+                    // corresponding node id (== zone_id) and then to the node internal number
+                    int internal_node_for_origin_node = g_map_external_node_id_2_node_seq_no[Orig]; 
                     // MinPathPredLink is coded as internal node id
-                    //
-                    // double total_travel_time = 0;
-                    // double total_length = 0;
-                    // double total_FFTT = 0;
 
                     while (CurrentNode != internal_node_for_origin_node) {
                         if (g_mode_type_vector[m].dedicated_shortest_path == 0) { // skip the shortest path computing
@@ -1016,7 +1014,7 @@ void performODME_2(std::vector<double> theta, double* MainVolume, struct link_re
     }
     logFile << "Starting ODME process.\n";
 
-    // Define a target total vehicle miles travelled (VMT)
+    // Define a target total vehicle miles traveled (VMT)
     double VMT_target = g_ODME_obs_VMT;
 
     // Weights for each component of the objective function
@@ -1667,12 +1665,6 @@ void OutputVehicleDetails(const std::string& filename, std::vector<double> theta
 
                             unique_route_id++;
                         }
-                        // else
-                        //{
-                        //     // Duplicate path found, skipping output
-                        //     //std::cout << "Duplicate route skipped for Origin: " << Orig << ", Destination: " <<
-                        //     Dest << "\n";
-                        // }
                     }
                 }
             }
@@ -1776,12 +1768,6 @@ void OutputODPerformance(const std::string& filename) {
 
                             unique_route_id++;
                         }
-                        // else
-                        //{
-                        //     // Duplicate path found, skipping output
-                        //     //std::cout << "Duplicate route skipped for Origin: " << Orig << ", Destination: " <<
-                        //     Dest << "\n";
-                        // }
                     }
                     break; // only compute travel time for the first route
                 }
@@ -1921,8 +1907,7 @@ void read_settings_file() {
     CDTACSVParser parser_settings;
 
     if (parser_settings.OpenCSVFile("settings.csv", true)) {
-        while (parser_settings.ReadRecord()) // if this line contains [] mark, then we will also read
-                                             // field headers.
+        while (parser_settings.ReadRecord()) // if this line contains [] mark, then we will also read field headers.
         {
             g_number_of_processors = 4;
             parser_settings.GetValueByFieldName("metric_system", g_metric_system_flag);
@@ -2276,15 +2261,6 @@ int AssignmentAPI() {
     // Log the result with hours, minutes, seconds, and milliseconds
     fprintf(summary_log_file, "CPU running time: %lld hours %lld minutes %lld seconds %lld ms\n", hours.count(),
             minutes.count(), seconds.count(), milliseconds.count());
-
-    // for (int k = 1; k <= number_of_links; k++)
-    //{
-    //     fprintf(logfile, "%d,%d,%d,%d,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf\n", iteration_no, k,
-    //         Link[k].external_from_node_id, Link[k].external_to_node_id, MainVolume[k],
-    //         Link[k].Capacity, MainVolume[k] / fmax(0.01, Link[k].Capacity),
-    //         Link[k].FreeTravelTime, Link[k].Travel_time,
-    //         Link[k].Travel_time - Link[k].FreeTravelTime);
-    // }
 
     // Compute the flow proportions (theta).
     std::vector<double> m_theta;
@@ -3004,9 +2980,6 @@ double Link_QueueVDF(int k, double Volume, double& IncomingDemand, double& DOC, 
             td_speed = (1 - factor) * fmax(congestion_ref_speed, avg_queue_speed) + (factor)*Link[k].free_speed;
         }
 
-        // dtalog.output() << "td_queue t" << t << " =  " << td_queue << ", speed =" << td_speed << '\n';
-        // g_DTA_log_file << "td_queue t" << t << " =  " << td_queue << ", speed =" << td_speed << '\n';
-
         if (t_in_min <= 410) {
             int idebug = 1;
         }
@@ -3343,14 +3316,6 @@ double LinksSDLineSearch(double* MainVolume, double* SDVolume) {
     return lambdaleft;
 }
 
-/// <summary>
-///  below is simulation codes
-/// </summary>
-///
-///
-///
-///
-// Add at the beginning of your code
 enum LogLevel {
     LOG_ERROR = 0, // Critical errors
     LOG_WARN = 1,  // Warnings
@@ -3446,12 +3411,6 @@ class SimulationLogger {
     }
 };
 
-//// Add to ParallelQueueSimulator class:
-// SimulationLogger logger;
-//
-//// Then in your simulation methods, add logging:
-// logger.logEvent(t, "agent_load", agent->agent_uid, l,
-//	link.entrance_queue.size(), "Agent loaded to link");
 class CAgent_Simu {
   public:
     int agent_uid;
@@ -3862,17 +3821,6 @@ class ParallelQueueSimulator {
             for (int link_id : node.m_incoming_link_seq_no_vector) {
                 total_demand += link_queues[link_id].exit_queue.size();
             }
-
-            // if (total_demand >= 1)
-            //{
-            //	// Distribute capacity if bottleneck exists
-            //	for (int link_id : node.m_incoming_link_seq_no_vector) {
-            //		if (total_demand > state.linkOutFlowCapacity[link_id][t]) {
-            //			double capacity_ratio = state.linkOutFlowCapacity[link_id][t] / total_demand;
-            //			state.linkOutFlowCapacity[link_id][t] *= capacity_ratio;
-            //		}
-            //	}
-            // }
         }
     }
 
@@ -4123,16 +4071,6 @@ int SimulationAPI() {
     return 0;
 }
 
-//// map_matching.cpp
-// #include <cmath>
-// #include <algorithm>
-// #include <vector>
-// #include <map>
-// #include <string>
-// #include <iostream>
-// #include <cstdio>
-// #include <cstdlib>
-
 namespace MapMatching {
 
 // Constants
@@ -4315,6 +4253,7 @@ class MatchingGrid {
             }
         }
     }
+
     // Process visited cells:
     // 1) Mark dwell cells (if time span > 120 minutes).
     // 2) For each link in a cell, loop over GPS points and update a matching cost.
@@ -4565,12 +4504,6 @@ int mapmatchingAPI() {
     double system_wide_travel_time = 0;
     double system_least_travel_time = 0;
 
-    // fprintf(logfile,
-    //     "iteration_no,link_id,internal_from_node_id,internal_to_node_id,volume,capacity,voc,"
-    //     "fftt,travel_time,delay\n");
-
-    // Init(number_of_modes, no_zones);
-
     InitLinks();
 
     MDMinPathPredLink = (int***)Alloc_3D(number_of_modes, no_zones, no_nodes, sizeof(int));
@@ -4631,7 +4564,7 @@ int mapmatchingAPI() {
     // ------------------------
     // Insert GPS points into the grid.
     // ------------------------
-    // Loop over each agent  for that agent.
+    // Loop over each agent for that agent.
     int max_route_size = 1;
 
     for (const auto& agentPair : gpsTraces) {
@@ -4647,8 +4580,6 @@ int mapmatchingAPI() {
             mGrid.insertGPSPoint(gps, gps.pt);
         }
 
-        ////#pragma omp parallel for
-        //		int Orig = agentPair.second.;  // get origin zone id
         int numPointsToAverage = 3;
         int originNodeId = 0;
         int destinationNodeId = 0;
@@ -4704,10 +4635,6 @@ int mapmatchingAPI() {
             int CurrentNode = g_map_external_node_id_2_node_seq_no[Dest];
 
             // MinPathPredLink is coded as internal node id
-            //
-            // double total_travel_time = 0;
-            // double total_length = 0;
-            // double total_FFTT = 0;
             // back trace
             while (CurrentNode != Orig) {
                 int k = MDMinPathPredLink[m][Orig][CurrentNode];
@@ -4732,18 +4659,18 @@ int mapmatchingAPI() {
             AddLinkSequence(m, Orig, Dest, route_id, currentLinkSequence);
         }
     }
-    std::vector<double> m_theta;
 
+    std::vector<double> m_theta;
     OutputRouteDetails("route_assignment.csv", m_theta);
 
     Free_3D((void***)MDMinPathPredLink, number_of_modes, no_zones, no_nodes);
     Free_2D((void**)CostTo, no_zones, no_nodes);
-    return 0;
+    
+	return 0;
 }
 
 int main() {
     mapmatchingAPI();
-    //
     // AssignmentAPI();
     // SimulationAPI();
 }

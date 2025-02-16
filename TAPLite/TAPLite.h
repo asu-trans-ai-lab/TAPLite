@@ -101,7 +101,6 @@ bool CDTACSVParser::OpenCSVFile(std::string fileName, bool b_required) {
                 }
                 else {
                     name = tmp_str.substr(start);
-                    // TRACE("%s,", name.c_str());
                 }
                 FieldsIndices[name] = (int)i;
             }
@@ -109,9 +108,6 @@ bool CDTACSVParser::OpenCSVFile(std::string fileName, bool b_required) {
         return true;
     }
     else {
-        if (b_required) {
-            // g_program_stop();
-        }
         return false;
     }
 }
@@ -166,8 +162,7 @@ std::vector<std::string> CDTACSVParser::ParseLine(std::string line) {
                 break;
             }
 
-            if (n1 == std::string::npos && n2 != std::string::npos) // last field with double
-                                                                    // quotes
+            if (n1 == std::string::npos && n2 != std::string::npos) // last field with double quotes
             {
                 size_t n3 = line.find_first_of('"', n2 + 1); // second double quote
 
@@ -184,9 +179,10 @@ std::vector<std::string> CDTACSVParser::ParseLine(std::string line) {
                 if (n1 < line.length() - 1) {
                     line = line.substr(n1 + 1);
                 }
-                else // comma is the last char in the line string, push an empty string to the back
-                     // of vector
+                else 
                 {
+                    // comma is the last char in the line string, push an empty string to the back 
+                    // of vector
                     SeperatedStrings.push_back("");
                     break;
                 }
@@ -212,12 +208,6 @@ std::vector<std::string> CDTACSVParser::ParseLine(std::string line) {
 
 bool CDTACSVParser::GetValueByFieldName(std::string field_name, std::string& value, bool required_field) {
     if (FieldsIndices.find(field_name) == FieldsIndices.end()) {
-        if (required_field) {
-            // dtalog.output() << "[ERROR] Field " << field_name << " in file " << mFileName << "
-            // does not exist. Please check the file." << '\n'; g_DTA_log_file << "[ERROR] Field "
-            // << field_name << " in file " << mFileName << " does not exist. Please check the
-            // file." << '\n'; g_program_stop();
-        }
         return false;
     }
     else {
@@ -245,12 +235,6 @@ bool CDTACSVParser::GetValueByFieldName(std::string field_name, std::string& val
 template <class T>
 bool CDTACSVParser::GetValueByFieldName(std::string field_name, T& value, bool required_field, bool NonnegativeFlag) {
     if (FieldsIndices.find(field_name) == FieldsIndices.end()) {
-        if (required_field) {
-            // dtalog.output() << "[ERROR] Field " << field_name << " in file " << mFileName.c_str()
-            // << " does not exist. Please check the file." << '\n'; g_DTA_log_file << "[ERROR]
-            // Field " << field_name << " in file " << mFileName.c_str() << " does not exist. Please
-            // check the file." << '\n'; g_program_stop();
-        }
         return false;
     }
     else {
@@ -274,18 +258,9 @@ bool CDTACSVParser::GetValueByFieldName(std::string field_name, T& value, bool r
         T converted_value;
         ss >> converted_value;
 
-        if (/*!ss.eof() || */ ss.fail()) {
+        if (ss.fail()) {
             return false;
         }
-
-        // if (required_field)
-        //{
-        //     if(NonnegativeFlag)
-        //     {
-        //         if (converted_value < 0)
-        //             converted_value = 0;
-        //     }
-        // }
 
         value = converted_value;
         return true;
@@ -293,11 +268,7 @@ bool CDTACSVParser::GetValueByFieldName(std::string field_name, T& value, bool r
 }
 
 void ExitMessage(const char* format, ...) {
-    va_list ap;
-
-    // vprintf(format, ap);
-    printf("\n");
-
+    printf('\n');
     getchar();
 
     exit(EXIT_FAILURE);
@@ -384,9 +355,6 @@ void Free_3D(void*** Array, int dim1, int dim2, int dim3) {
     free(Array);
 }
 
-/* Internal functions */
-
-/* Initialization functions */
 struct CLink {
     int link_id;
     int internal_from_node_id;
