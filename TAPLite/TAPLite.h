@@ -92,6 +92,7 @@ void CDTACSVParser::ConvertLineStringValueToIntegers() {
 }
 
 bool CDTACSVParser::OpenCSVFile(const std::string& fileName, bool b_required) {
+    mFileName = fileName;
     inFile.open(fileName.c_str());
 
     if (inFile.is_open()) {

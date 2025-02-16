@@ -31,7 +31,27 @@
 #include <unordered_map> // For hash table (unordered_map)
 #include <vector>
 
-using namespace std;
+using namespace std::chrono;
+
+using std::cerr;
+using std::cout;
+using std::deque;
+using std::fabs;
+using std::fixed;
+using std::make_shared;
+using std::map;
+using std::max;
+using std::min;
+using std::ofstream;
+using std::ostringstream;
+using std::setprecision;
+using std::shared_ptr;
+using std::sqrt;
+using std::string;
+using std::stringstream;
+using std::to_string;
+using std::unordered_map;
+using std::vector;
 
 #ifndef _WIN32
 void fopen_s(FILE** file, const char* fileName, const char* mode) { 
@@ -63,7 +83,7 @@ struct link_record {
 
     double length;
     double Speed;
-    std::string allowed_uses;
+    string allowed_uses;
     int mode_allowed_use[MAX_MODE_TYPES];
     double mode_MainVolume[MAX_MODE_TYPES];
     double mode_Base_Volume[MAX_MODE_TYPES];
@@ -82,7 +102,7 @@ struct link_record {
     double Ref_volume;
     double Base_volume;
     double Obs_volume;
-    std::string geometry;
+    string geometry;
 
     int timing_arc_flag, cycle_length, start_green_time, end_green_time;
 
@@ -135,12 +155,12 @@ struct link_record {
 };
 
 struct mode_type {
-    std::string mode_type;
+    string mode_type;
     float vot;
     float pce;
     float occ;
     int dedicated_shortest_path;
-    std::string demand_file;
+    string demand_file;
 };
 
 class Node {
@@ -347,7 +367,7 @@ int Minpath(int mode, int Orig, int* PredLink, double* CostTo) {
 Input: 	None
 Output:	RouteCost - route generalized cost, by origin and destination
                 MinPathSuccLink - trees of minimum cost routes, by destination and node. */
-std::vector<int> Processor_origin_zones[50];
+vector<int> Processor_origin_zones[50];
 
 int g_number_of_processors = 4;
 
@@ -424,9 +444,9 @@ double FindMinCostRoutes(int*** MinPathPredLink) {
 // Define a global 3D vector to store link indices for each OD pair
 
 // Global 5D vector for storing link sequences
-std::vector<std::vector<std::vector<std::vector<std::vector<int>>>>> linkIndices;
+vector<vector<vector<vector<vector<int>>>>> linkIndices;
 
-void AddLinkSequence(int m, int Orig, int Dest, int route_id, const std::vector<int>& linkIDs) {
+void AddLinkSequence(int m, int Orig, int Dest, int route_id, const vector<int>& linkIDs) {
     if (linkIndices.empty()) {
         return;
     }
@@ -437,28 +457,28 @@ void AddLinkSequence(int m, int Orig, int Dest, int route_id, const std::vector<
         linkIndices[m][Orig][Dest][route_id] = linkIDs; // Add link sequence to the 5D vector
     }
     else {
-        std::cerr << "Error: Invalid indices for adding link sequence." << std::endl;
+        cerr << "Error: Invalid indices for adding link sequence.\n";
     }
 }
 
 void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int*** MinPathPredLink, double* Volume) {
     printf("All or nothing assignment\n");
 
-    auto start0 = std::chrono::high_resolution_clock::now();
+    auto start0 = high_resolution_clock::now();
     double** ProcessorVolume;
     double*** ProcessorModeVolume;
 
     ProcessorVolume = (double**)Alloc_2D(number_of_links, g_number_of_processors, sizeof(double));
 
     if (ProcessorVolume == nullptr) {
-        std::cerr << "Error: Memory allocation for ProcessorVolume failed." << std::endl;
+        cerr << "Error: Memory allocation for ProcessorVolume failed.\n";
         // Handle the error, e.g., exit the program, clean up resources, etc.
         exit(EXIT_FAILURE);
     }
 
     ProcessorModeVolume = (double***)Alloc_3D(number_of_links, number_of_modes, g_number_of_processors, sizeof(double));
     if (ProcessorModeVolume == nullptr) {
-        std::cerr << "Error: Memory allocation for ProcessorModeVolume failed." << std::endl;
+        cerr << "Error: Memory allocation for ProcessorModeVolume failed.\n";
         // Handle the error, e.g., exit the program, clean up resources, etc.
         exit(EXIT_FAILURE);
     }
@@ -518,7 +538,7 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
             int Dest, k;
             int CurrentNode;
             double RouteFlow;
-            std::vector<int> currentLinkSequence; // Temporary vector to store link indices
+            vector<int> currentLinkSequence; // Temporary vector to store link indices
 
             for (int m = 1; m <= number_of_modes; m++) {
 
@@ -645,7 +665,7 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
     Free_2D((void**)ProcessorVolume, number_of_links, g_number_of_processors);
     Free_3D((void***)ProcessorModeVolume, number_of_links, number_of_modes, g_number_of_processors);
 
-    auto end0 = std::chrono::high_resolution_clock::now();
+    auto end0 = high_resolution_clock::now();
 
     // Calculate the duration in milliseconds
 
@@ -653,21 +673,21 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
     auto duration = end0 - start0;
 
     // Convert to hours, minutes, seconds
-    auto hours = std::chrono::duration_cast<std::chrono::hours>(duration);
-    auto minutes = std::chrono::duration_cast<std::chrono::minutes>(duration % std::chrono::hours(1));
-    auto seconds = std::chrono::duration_cast<std::chrono::seconds>(duration % std::chrono::minutes(1));
-    auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(duration % std::chrono::seconds(1));
+    auto hours = duration_cast<std::chrono::hours>(duration);
+    auto minutes = duration_cast<std::chrono::minutes>(duration % std::chrono::hours(1));
+    auto seconds = duration_cast<std::chrono::seconds>(duration % std::chrono::minutes(1));
+    auto milliseconds = duration_cast<std::chrono::milliseconds>(duration % std::chrono::seconds(1));
 
-    printf("All or nothing assignment: %lld hours %lld minutes %lld seconds %lld ms\n", hours.count(), minutes.count(),
+    printf("All or nothing assignment: %ld hours %ld minutes %lld seconds %lld ms\n", hours.count(), minutes.count(),
            seconds.count(), milliseconds.count());
 }
 
 //---------------------------------------------------------------------------
 // ODME via Gradient Descent
 //---------------------------------------------------------------------------
-std::vector<double> computeTheta(const std::vector<double>& lambda) {
+vector<double> computeTheta(const vector<double>& lambda) {
     // Start with the initial path which has a proportion of 1.
-    std::vector<double> theta;
+    vector<double> theta;
     theta.push_back(1.0);
 
     // For each iteration, update the current theta values and add the new path's proportion.
@@ -682,11 +702,11 @@ std::vector<double> computeTheta(const std::vector<double>& lambda) {
 
     return theta;
 }
-void performODME(const std::vector<double>& theta, double* MainVolume, struct link_record* Link) {
+void performODME(const vector<double>& theta, double* MainVolume, struct link_record* Link) {
     // Open log file (this will overwrite any existing file with the same name)
-    std::ofstream logFile("ODME_log.txt");
+    ofstream logFile("ODME_log.txt");
     if (!logFile.is_open()) {
-        std::cerr << "Error: Could not open ODME_log.txt for writing." << std::endl;
+        cerr << "Error: Could not open ODME_log.txt for writing.\n";
         return;
     }
     logFile << "Starting ODME process.\n";
@@ -715,7 +735,7 @@ void performODME(const std::vector<double>& theta, double* MainVolume, struct li
     //   - VMT deviations: w_vmt * (VMT - VMT_target)^2.
     auto computeObjectiveForMDOD = [&](double*** mdod) -> double {
         // Compute link flows from the given OD matrix "mdod"
-        std::vector<double> linkFlows(number_of_links + 1, 0.0);
+        vector<double> linkFlows(number_of_links + 1, 0.0);
         for (int m = 1; m <= numModes; ++m) {
             for (int Orig = 1; Orig <= numZones; ++Orig) {
                 for (int Dest = 1; Dest <= numZones; ++Dest) {
@@ -727,7 +747,7 @@ void performODME(const std::vector<double>& theta, double* MainVolume, struct li
                         continue;
                     }
                     // Use available routes (assume equal split)
-                    int nRoutes = std::min(theta.size(), linkIndices[m][Orig][Dest].size());
+                    int nRoutes = min(theta.size(), linkIndices[m][Orig][Dest].size());
                     for (int route_id = 0; route_id < nRoutes; route_id++) {
                         float routeFlow = od_flow * theta[route_id];
                         if (linkIndices[m][Orig][Dest][route_id].empty()) {
@@ -798,7 +818,7 @@ void performODME(const std::vector<double>& theta, double* MainVolume, struct li
                             continue;
                         }
                         double diff = MDODflow[m][Orig][Dest] - targetMDODflow[m][Orig][Dest];
-                        totalODDev += std::fabs(diff);
+                        totalODDev += fabs(diff);
                         odCount++;
                     }
                 }
@@ -806,7 +826,7 @@ void performODME(const std::vector<double>& theta, double* MainVolume, struct li
             double avgODDev = (odCount > 0 ? totalODDev / odCount : 0.0);
 
             // Link deviation: compute link flows and compare with observed volume
-            std::vector<double> linkFlows(number_of_links + 1, 0.0);
+            vector<double> linkFlows(number_of_links + 1, 0.0);
             for (int m = 1; m <= numModes; ++m) {
                 for (int Orig = 1; Orig <= numZones; ++Orig) {
                     for (int Dest = 1; Dest <= numZones; ++Dest) {
@@ -817,7 +837,7 @@ void performODME(const std::vector<double>& theta, double* MainVolume, struct li
                         if (od_flow <= 0) {
                             continue;
                         }
-                        int nRoutes = std::min(theta.size(), linkIndices[m][Orig][Dest].size());
+                        int nRoutes = min(theta.size(), linkIndices[m][Orig][Dest].size());
                         for (int route_id = 0; route_id < nRoutes; route_id++) {
                             float routeFlow = od_flow * theta[route_id];
                             if (linkIndices[m][Orig][Dest][route_id].empty()) {
@@ -836,7 +856,7 @@ void performODME(const std::vector<double>& theta, double* MainVolume, struct li
             int linkCount = 0;
             for (size_t i = 0; i < linkFlows.size(); ++i) {
                 if (Link[i].Obs_volume > 1) {
-                    totalLinkDev += std::fabs(linkFlows[i] - Link[i].Obs_volume);
+                    totalLinkDev += fabs(linkFlows[i] - Link[i].Obs_volume);
                     linkCount++;
                 }
             }
@@ -854,8 +874,8 @@ void performODME(const std::vector<double>& theta, double* MainVolume, struct li
         }
 
         // Allocate a 3D structure for gradients (assumed same dimensions as MDODflow)
-        std::vector<std::vector<std::vector<double>>> gradMDOD(
-            numModes + 1, std::vector<std::vector<double>>(numZones + 1, std::vector<double>(numZones + 1, 0.0)));
+        vector<vector<vector<double>>> gradMDOD(
+            numModes + 1, vector<vector<double>>(numZones + 1, vector<double>(numZones + 1, 0.0)));
 
         double sumGradSq = 0.0;
         // --- Compute gradients for each OD pair ---
@@ -874,7 +894,7 @@ void performODME(const std::vector<double>& theta, double* MainVolume, struct li
                     double grad_vmt = 0.0;
                     // For link contributions, count usage of each link for this OD pair.
                     int routeCount = 0;
-                    std::unordered_map<int, int> linkUsage;
+                    unordered_map<int, int> linkUsage;
                     for (int route_id = 0; route_id < static_cast<int>(linkIndices[m][Orig][Dest].size()); ++route_id) {
                         if (linkIndices[m][Orig][Dest][route_id].empty()) {
                             continue;
@@ -913,9 +933,9 @@ void performODME(const std::vector<double>& theta, double* MainVolume, struct li
         }
 
         // Check for convergence based on the norm of the gradient.
-        if (std::sqrt(sumGradSq) < tol) {
+        if (sqrt(sumGradSq) < tol) {
             logFile << "Convergence reached after " << iter << " iterations.\n";
-            std::cout << "Convergence reached after " << iter << " iterations.\n";
+            cout << "Convergence reached after " << iter << " iterations.\n";
             break;
         }
 
@@ -971,8 +991,8 @@ void performODME(const std::vector<double>& theta, double* MainVolume, struct li
 
     // --------------------------------------------------
     // Final synchronization of path flow and link volume (unchanged)
-    std::vector<double> linkFlows(number_of_links + 1, 0.0);
-    std::vector<std::vector<double>> mode_linkFlows(numModes + 1, std::vector<double>(number_of_links + 1, 0.0));
+    vector<double> linkFlows(number_of_links + 1, 0.0);
+    vector<vector<double>> mode_linkFlows(numModes + 1, vector<double>(number_of_links + 1, 0.0));
     for (int m = 1; m <= numModes; ++m) {
         for (int Orig = 1; Orig <= numZones; ++Orig) {
             for (int Dest = 1; Dest <= numZones; ++Dest) {
@@ -983,7 +1003,7 @@ void performODME(const std::vector<double>& theta, double* MainVolume, struct li
                 if (od_flow <= 0) {
                     continue;
                 }
-                int nRoutes = std::min(theta.size(), linkIndices[m][Orig][Dest].size());
+                int nRoutes = min(theta.size(), linkIndices[m][Orig][Dest].size());
                 for (int route_id = 0; route_id < nRoutes; route_id++) {
                     float routeFlow = od_flow * theta[route_id];
                     if (linkIndices[m][Orig][Dest][route_id].empty()) {
@@ -1007,11 +1027,11 @@ void performODME(const std::vector<double>& theta, double* MainVolume, struct li
     logFile.close();
 }
 
-void performODME_2(std::vector<double> theta, double* MainVolume, struct link_record* Link) {
+void performODME_2(vector<double> theta, double* MainVolume, struct link_record* Link) {
     // Open log file (this will overwrite any existing file with the same name)
-    std::ofstream logFile("ODME_log.txt");
+    ofstream logFile("ODME_log.txt");
     if (!logFile.is_open()) {
-        std::cerr << "Error: Could not open ODME_log.txt for writing." << std::endl;
+        cerr << "Error: Could not open ODME_log.txt for writing.\n";
         return;
     }
     logFile << "Starting ODME process.\n";
@@ -1038,7 +1058,7 @@ void performODME_2(std::vector<double> theta, double* MainVolume, struct link_re
         logFile << "--------------------------------------------------\n";
         logFile << "Iteration " << iter << " begins.\n";
         // 1. Compute link flows from OD flows using the candidate routes.
-        std::vector<double> linkFlows(number_of_links + 1, 0.0);
+        vector<double> linkFlows(number_of_links + 1, 0.0);
 
         // Loop over modes and OD pairs (skip unused indices)
         for (int m = 1; m <= numModes; ++m) {
@@ -1064,7 +1084,7 @@ void performODME_2(std::vector<double> theta, double* MainVolume, struct link_re
                     }
 
                     // Assume OD flow is equally split among available routes.
-                    int nRoutes = std::min(theta.size(), linkIndices[m][Orig][Dest].size());
+                    int nRoutes = min(theta.size(), linkIndices[m][Orig][Dest].size());
                     for (int route_id = 0; route_id < nRoutes; route_id++) {
                         float routeFlow = od_flow * theta[route_id];
 
@@ -1113,7 +1133,7 @@ void performODME_2(std::vector<double> theta, double* MainVolume, struct link_re
                         if (Orig == Dest) {
                             continue;
                         }
-                        double dev = std::fabs(MDODflow[m][Orig][Dest] - targetMDODflow[m][Orig][Dest]);
+                        double dev = fabs(MDODflow[m][Orig][Dest] - targetMDODflow[m][Orig][Dest]);
 
                         // Polished log output for this OD pair
                         logFile << "Mode " << m << ", OD pair (" << Orig << ", " << Dest << "): "
@@ -1122,7 +1142,7 @@ void performODME_2(std::vector<double> theta, double* MainVolume, struct link_re
                                 << "Deviation = " << dev << ", "
                                 << "Max deviation so far = " << maxDemandDev << "\n";
 
-                        maxDemandDev = std::max(maxDemandDev, dev);
+                        maxDemandDev = max(maxDemandDev, dev);
                         sumDemandDev += dev;
                         total_obj_deviation += dev;
                         total_obj_od_deviation += dev;
@@ -1139,8 +1159,8 @@ void performODME_2(std::vector<double> theta, double* MainVolume, struct link_re
             int countLinks = 0;
             for (size_t i = 0; i < linkFlows.size(); ++i) {
                 if (Link[i].Obs_volume > 1) {
-                    double dev = std::fabs(linkFlows[i] - Link[i].Obs_volume);
-                    maxLinkDev = std::max(maxLinkDev, dev);
+                    double dev = fabs(linkFlows[i] - Link[i].Obs_volume);
+                    maxLinkDev = max(maxLinkDev, dev);
                     sumLinkDev += dev;
                     total_obj_deviation += dev;
                     total_obj_link_deviation += dev;
@@ -1173,7 +1193,7 @@ void performODME_2(std::vector<double> theta, double* MainVolume, struct link_re
                     float od_flow = MDODflow[m][Orig][Dest];
                     // Count valid routes and accumulate link usage.
                     int routeCount = 0;
-                    std::unordered_map<int, int> linkUsage; // key: link_id, value: count of routes using this link
+                    unordered_map<int, int> linkUsage; // key: link_id, value: count of routes using this link
                     for (int route_id = 0; route_id < (int)linkIndices[m][Orig][Dest].size(); ++route_id) {
                         if (linkIndices[m][Orig][Dest][route_id].empty()) {
                             continue;
@@ -1209,13 +1229,13 @@ void performODME_2(std::vector<double> theta, double* MainVolume, struct link_re
                     double total_grad = grad_link + grad_vmt + grad_od;
 
                     // Update maximum gradient (for convergence checking)
-                    maxGrad = std::max(maxGrad, std::fabs(total_grad));
+                    maxGrad = max(maxGrad, fabs(total_grad));
                     // Log detailed info for a few OD pairs if needed (optional)
                     // For example, log if the gradient is large:
 
                     // Update OD flow using gradient descent step.
                     MDODflow[m][Orig][Dest] -= step_size * total_grad;
-                    if (std::fabs(total_grad) > 1e-3) {
+                    if (fabs(total_grad) > 1e-3) {
                         logFile << "    [Mode " << m << " OD(" << Orig << "," << Dest << ")] "
                                 << "od_flow=" << od_flow << ", grad_link=" << grad_link << ", grad_vmt=" << grad_vmt
                                 << ", grad_od=" << grad_od << ", total_grad=" << total_grad
@@ -1244,7 +1264,7 @@ void performODME_2(std::vector<double> theta, double* MainVolume, struct link_re
         // Check for convergence.
         if (maxGrad < tol) {
             logFile << "Convergence reached after " << iter << " iterations.\n";
-            std::cout << "Convergence reached after " << iter << " iterations.\n";
+            cout << "Convergence reached after " << iter << " iterations.\n";
             break;
         }
     } // End of gradient descent loop
@@ -1253,8 +1273,8 @@ void performODME_2(std::vector<double> theta, double* MainVolume, struct link_re
     // at the last iteration we still need to synchronize the path flow and link volume
     // Loop over modes and OD pairs (skip unused indices)
 
-    std::vector<double> linkFlows(number_of_links + 1, 0.0);
-    std::vector<std::vector<double>> mode_linkFlows(numModes + 1, std::vector<double>(number_of_links + 1, 0.0));
+    vector<double> linkFlows(number_of_links + 1, 0.0);
+    vector<vector<double>> mode_linkFlows(numModes + 1, vector<double>(number_of_links + 1, 0.0));
     for (int m = 1; m <= numModes; ++m) {
         for (int Orig = 1; Orig <= numZones; ++Orig) {
             for (int Dest = 1; Dest <= numZones; ++Dest) {
@@ -1278,7 +1298,7 @@ void performODME_2(std::vector<double> theta, double* MainVolume, struct link_re
                 }
 
                 // Assume OD flow is equally split among available routes.
-                int nRoutes = std::min(theta.size(), linkIndices[m][Orig][Dest].size());
+                int nRoutes = min(theta.size(), linkIndices[m][Orig][Dest].size());
                 for (int route_id = 0; route_id < nRoutes; route_id++) {
                     float routeFlow = od_flow * theta[route_id];
 
@@ -1306,17 +1326,17 @@ void performODME_2(std::vector<double> theta, double* MainVolume, struct link_re
 struct RouteData {
     int firstRouteID;       // The first encountered route_id (optional)
     int unique_route_id;    // A sequential unique id for output
-    std::string nodeIDsStr; // Node IDs (string)
-    std::string linkIDsStr; // Link IDs (string)
+    string nodeIDsStr; // Node IDs (string)
+    string linkIDsStr; // Link IDs (string)
     double totalDistance;
     double totalFreeFlowTravelTime;
     double totalTravelTime;
     double accumulatedTheta = 0; // Sum of theta for all routes with this key
-    std::string routeKey;        // Unique key (e.g., based on node and link sums)
+    string routeKey;        // Unique key (e.g., based on node and link sums)
 };
 
-void OutputRouteDetails(const std::string& filename, const std::vector<double>& theta) {
-    std::ofstream outputFile(filename); // Open the file for writing
+void OutputRouteDetails(const string& filename, const vector<double>& theta) {
+    ofstream outputFile(filename); // Open the file for writing
 
     if (linkIndices.empty()) {
         return;
@@ -1329,7 +1349,7 @@ void OutputRouteDetails(const std::string& filename, const std::vector<double>& 
     for (int m = 1; m < linkIndices.size(); ++m) {
         for (int Orig = 1; Orig < linkIndices[m].size(); ++Orig) {
             for (int Dest = 1; Dest < linkIndices[m][Orig].size(); ++Dest) {
-                std::unordered_map<std::string, RouteData> uniqueRoutes;
+                unordered_map<string, RouteData> uniqueRoutes;
 
                 // Reset unique route counter.
                 int unique_route_id = 1;
@@ -1340,8 +1360,8 @@ void OutputRouteDetails(const std::string& filename, const std::vector<double>& 
                         double totalDistance = 0.0;
                         double totalFreeFlowTravelTime = 0.0;
                         double totalTravelTime = 0.0;
-                        std::string nodeIDsStr;
-                        std::string linkIDsStr;
+                        string nodeIDsStr;
+                        string linkIDsStr;
 
                         int nodeSum = 0; // Sum of node IDs (for uniqueness key)
                         int linkSum = 0; // Sum of link IDs (for uniqueness key)
@@ -1352,11 +1372,11 @@ void OutputRouteDetails(const std::string& filename, const std::vector<double>& 
 
                             // Append the from_node_id and accumulate its value.
                             int fromNodeID = Link[k].external_from_node_id;
-                            nodeIDsStr += std::to_string(fromNodeID) + ";";
+                            nodeIDsStr += to_string(fromNodeID) + ";";
                             nodeSum += fromNodeID;
 
                             // Append the link index (as a proxy for link ID) and accumulate.
-                            linkIDsStr += std::to_string(k) + ";";
+                            linkIDsStr += to_string(k) + ";";
                             linkSum += k;
 
                             // Sum the distance and travel times.
@@ -1367,13 +1387,13 @@ void OutputRouteDetails(const std::string& filename, const std::vector<double>& 
                             // For the first link in the (reversed) order, also add the to_node_id.
                             if (i == 0) {
                                 int toNodeID = Link[k].external_to_node_id;
-                                nodeIDsStr += std::to_string(toNodeID);
+                                nodeIDsStr += to_string(toNodeID);
                                 nodeSum += toNodeID;
                             }
                         }
 
                         // Create a unique key for the route.
-                        std::string routeKey = std::to_string(nodeSum) + "_" + std::to_string(linkSum);
+                        string routeKey = to_string(nodeSum) + "_" + to_string(linkSum);
 
                         // Check if this unique route already exists.
                         auto it = uniqueRoutes.find(routeKey);
@@ -1420,7 +1440,7 @@ void OutputRouteDetails(const std::string& filename, const std::vector<double>& 
                         route_volume = od_volume * rd.accumulatedTheta;
                     }
                     // (Optional) Remove trailing semicolon from linkIDsStr if needed.
-                    std::string cleanedLinkIDsStr = rd.linkIDsStr;
+                    string cleanedLinkIDsStr = rd.linkIDsStr;
                     if (!cleanedLinkIDsStr.empty() && cleanedLinkIDsStr.back() == ';') {
                         cleanedLinkIDsStr.pop_back();
                     }
@@ -1439,7 +1459,7 @@ void OutputRouteDetails(const std::string& filename, const std::vector<double>& 
     // Close the file after writing
     outputFile.close();
 
-    std::cout << "Output written to " << filename << std::endl;
+    cout << "Output written to " << filename << std::endl;
 }
 
 constexpr auto LCG_a = 17364;
@@ -1454,7 +1474,7 @@ float generate_random() {
 }
 
 // Helper function to convert minutes to hh:mm:ss format
-std::string convert_minutes_to_hhmmss(double minutes) {
+string convert_minutes_to_hhmmss(double minutes) {
     int total_seconds = static_cast<int>(minutes * 60); // Convert minutes to total seconds
     int hours = total_seconds / 3600;                   // Extract hours
     int remaining_seconds = total_seconds % 3600;       // Remaining seconds after hours
@@ -1462,7 +1482,7 @@ std::string convert_minutes_to_hhmmss(double minutes) {
     int secs = remaining_seconds % 60;                  // Extract seconds
 
     // Format as hh:mm:ss
-    std::ostringstream oss;
+    ostringstream oss;
     oss << std::setw(2) << std::setfill('0') << hours << ":" << std::setw(2) << std::setfill('0') << mins << ":"
         << std::setw(2) << std::setfill('0') << secs;
 
@@ -1472,8 +1492,8 @@ std::string convert_minutes_to_hhmmss(double minutes) {
 // Additional functions (find_links_to, init_link_pointers, init_links) would follow
 // with similar C++ implementations...
 // Calculate departure time function
-std::vector<double> calculate_departure_time(double T0, double T1, double T3, double beta, int route_volume) {
-    std::vector<double> departure_times;
+vector<double> calculate_departure_time(double T0, double T1, double T3, double beta, int route_volume) {
+    vector<double> departure_times;
     double time_span = T3 - T0;
 
     for (int i = 0; i < route_volume; i++) {
@@ -1484,11 +1504,11 @@ std::vector<double> calculate_departure_time(double T0, double T1, double T3, do
 
     return departure_times;
 }
-void OutputVehicleDetails(const std::string& filename, const std::vector<double>& theta) {
+void OutputVehicleDetails(const string& filename, const vector<double>& theta) {
     // Record the start time
-    auto start = std::chrono::high_resolution_clock::now();
+    auto start = high_resolution_clock::now();
 
-    std::ofstream outputFile(filename); // Open the file for writing
+    ofstream outputFile(filename); // Open the file for writing
 
     if (linkIndices.empty()) {
         return;
@@ -1503,7 +1523,7 @@ void OutputVehicleDetails(const std::string& filename, const std::vector<double>
     for (int m = 1; m < linkIndices.size(); ++m) {
         for (int Orig = 1; Orig < linkIndices[m].size(); ++Orig) {
             for (int Dest = 1; Dest < linkIndices[m][Orig].size(); ++Dest) {
-                std::unordered_map<std::string, RouteData> uniqueRoutes;
+                unordered_map<string, RouteData> uniqueRoutes;
 
                 // Reset unique route counter.
                 int unique_route_id = 1;
@@ -1514,8 +1534,8 @@ void OutputVehicleDetails(const std::string& filename, const std::vector<double>
                         double totalDistance = 0.0;
                         double totalFreeFlowTravelTime = 0.0;
                         double totalTravelTime = 0.0;
-                        std::string nodeIDsStr;
-                        std::string linkIDsStr;
+                        string nodeIDsStr;
+                        string linkIDsStr;
 
                         int nodeSum = 0; // Sum of node IDs (for uniqueness key)
                         int linkSum = 0; // Sum of link IDs (for uniqueness key)
@@ -1526,11 +1546,11 @@ void OutputVehicleDetails(const std::string& filename, const std::vector<double>
 
                             // Append the from_node_id and accumulate its value.
                             int fromNodeID = Link[k].external_from_node_id;
-                            nodeIDsStr += std::to_string(fromNodeID) + ";";
+                            nodeIDsStr += to_string(fromNodeID) + ";";
                             nodeSum += fromNodeID;
 
                             // Append the link index (as a proxy for link ID) and accumulate.
-                            linkIDsStr += std::to_string(k) + ";";
+                            linkIDsStr += to_string(k) + ";";
                             linkSum += k;
 
                             // Sum the distance and travel times.
@@ -1541,13 +1561,13 @@ void OutputVehicleDetails(const std::string& filename, const std::vector<double>
                             // For the first link in the (reversed) order, also add the to_node_id.
                             if (i == 0) {
                                 int toNodeID = Link[k].external_to_node_id;
-                                nodeIDsStr += std::to_string(toNodeID);
+                                nodeIDsStr += to_string(toNodeID);
                                 nodeSum += toNodeID;
                             }
                         }
 
                         // Create a unique key for the route.
-                        std::string routeKey = std::to_string(nodeSum) + "_" + std::to_string(linkSum);
+                        string routeKey = to_string(nodeSum) + "_" + to_string(linkSum);
 
                         // Check if this unique route already exists.
                         auto it = uniqueRoutes.find(routeKey);
@@ -1586,10 +1606,10 @@ void OutputVehicleDetails(const std::string& filename, const std::vector<double>
                         double totalDistance = 0.0;
                         double totalFreeFlowTravelTime = 0.0;
                         double totalTravelTime = 0.0;
-                        std::string nodeIDsStr;
-                        std::string linkIDsStr;
+                        string nodeIDsStr;
+                        string linkIDsStr;
 
-                        std::vector<double> linkTravelTimes; // Store travel times for each link
+                        vector<double> linkTravelTimes; // Store travel times for each link
                                                              // Record the travel time for this link
                         for (int i = linkIndices[m][Orig][Dest][rd.firstRouteID].size() - 1; i >= 0; --i) {
                             int k = linkIndices[m][Orig][Dest][rd.firstRouteID][i];
@@ -1631,7 +1651,7 @@ void OutputVehicleDetails(const std::string& filename, const std::vector<double>
                                     time_increment_in_min = 1;
                                 }
 
-                                std::vector<double> nodeArrivalTimes; // Store arrival times for each node
+                                vector<double> nodeArrivalTimes; // Store arrival times for each node
                                 double cumulativeTime = departure_time;
                                 // Calculate arrival times for each node
                                 for (double travelTime : linkTravelTimes) {
@@ -1639,7 +1659,7 @@ void OutputVehicleDetails(const std::string& filename, const std::vector<double>
                                     nodeArrivalTimes.push_back(cumulativeTime);
                                 }
 
-                                std::string timeSequenceStr;
+                                string timeSequenceStr;
                                 // Convert arrival times to a semicolon-separated string
                                 timeSequenceStr.clear();
                                 for (double time : nodeArrivalTimes) {
@@ -1651,7 +1671,7 @@ void OutputVehicleDetails(const std::string& filename, const std::vector<double>
 
                                 // departure_time += std::rand() * time_increment_in_min;
 
-                                std::string departure_time_hhmmss = convert_minutes_to_hhmmss(departure_time);
+                                string departure_time_hhmmss = convert_minutes_to_hhmmss(departure_time);
 
                                 // Write the data for this OD pair and route to the CSV file
                                 outputFile << agent_id << "," << departure_time << "," << departure_time_hhmmss << ","
@@ -1674,11 +1694,11 @@ void OutputVehicleDetails(const std::string& filename, const std::vector<double>
     // Close the file after writing
     outputFile.close();
 
-    std::cout << "Output written to " << filename << std::endl;
+    cout << "Output written to " << filename << std::endl;
     // Record the end time
 }
 
-void OutputODPerformance(const std::string& filename) {
+void OutputODPerformance(const string& filename) {
     std::ofstream outputFile(filename); // Open the file for writing
 
     // Write the CSV header in lowercase
@@ -1693,15 +1713,15 @@ void OutputODPerformance(const std::string& filename) {
     for (int m = 1; m < linkIndices.size(); ++m) {
         for (int Orig = 1; Orig < linkIndices[m].size(); ++Orig) {
             for (int Dest = 1; Dest < linkIndices[m][Orig].size(); ++Dest) {
-                std::unordered_map<std::string, bool> uniqueRoutes;
+                unordered_map<string, bool> uniqueRoutes;
                 int unique_route_id = 1;
                 for (int route_id = 0; route_id < linkIndices[m][Orig][Dest].size(); ++route_id) {
                     if (!linkIndices[m][Orig][Dest][route_id].empty()) {
                         double totalDistance = 0.0;
                         double totalFreeFlowTravelTime = 0.0;
                         double totalTravelTime = 0.0;
-                        std::string nodeIDsStr;
-                        std::string linkIDsStr;
+                        string nodeIDsStr;
+                        string linkIDsStr;
 
                         long nodeSum = 0; // Sum of node IDs
                         long linkSum = 0; // Sum of link IDs
@@ -1712,11 +1732,11 @@ void OutputODPerformance(const std::string& filename) {
 
                             // Append the from_node_id for each link and calculate the node sum
                             int fromNodeID = Link[k].external_from_node_id;
-                            nodeIDsStr += std::to_string(fromNodeID) + ";";
+                            nodeIDsStr += to_string(fromNodeID) + ";";
                             nodeSum += fromNodeID;
 
                             // Append the link index (link ID) to the string and calculate the link sum
-                            linkIDsStr += std::to_string(k) + ";";
+                            linkIDsStr += to_string(k) + ";";
                             linkSum += k;
 
                             // Sum up the total distance and travel times
@@ -1727,13 +1747,13 @@ void OutputODPerformance(const std::string& filename) {
                             // For the last link, also add the to_node_id
                             if (i == 0) {
                                 int toNodeID = Link[k].external_to_node_id;
-                                nodeIDsStr += std::to_string(toNodeID);
+                                nodeIDsStr += to_string(toNodeID);
                                 nodeSum += toNodeID;
                             }
                         }
 
                         // Create a unique key based on the node sum and link sum
-                        std::string routeKey = std::to_string(nodeSum) + "_" + std::to_string(linkSum);
+                        string routeKey = to_string(nodeSum) + "_" + to_string(linkSum);
 
                         // Check if this route (based on node and link sums) is already output
                         if (uniqueRoutes.find(routeKey) == uniqueRoutes.end()) {
@@ -1779,14 +1799,14 @@ void OutputODPerformance(const std::string& filename) {
         grand_total_count = 0.001;
     }
 
-    std::cout << "OD performance summary: avg distance = " << grand_totalDistance / grand_total_count << " miles, "
+    cout << "OD performance summary: avg distance = " << grand_totalDistance / grand_total_count << " miles, "
               << ", avg free-flow travel time = " << grand_totalFreeFlowTravelTime / grand_total_count << " min, "
               << ", avg total travel time = " << grand_totalTravelTime / grand_total_count << " min"
               << ", avg travel time index = " << grand_totalTravelTime / grand_totalFreeFlowTravelTime << " "
               << std::endl;
     // Close the file after writing
     outputFile.close();
-    std::cout << "Output written to " << filename << std::endl;
+    cout << "Output written to " << filename << std::endl;
 }
 
 int get_number_of_nodes_from_node_file(int& number_of_zones, int& l_FirstThruNode) {
@@ -1882,10 +1902,10 @@ int get_number_of_links_from_link_file() {
     return number_of_links;
 }
 
-void createSettingsFile(const std::string& fileName) {
-    std::ofstream file(fileName);
+void createSettingsFile(const string& fileName) {
+    ofstream file(fileName);
     if (!file.is_open()) {
-        std::cerr << "Could not create the file: " << fileName << std::endl;
+        cerr << "Could not create the file: " << fileName << '\n';
         return;
     }
 
@@ -1898,7 +1918,7 @@ void createSettingsFile(const std::string& fileName) {
     file << "0,10,8,7,18,0,0,0,0,0,0\n";
 
     file.close();
-    std::cout << "sample_settings.csv file created successfully!" << std::endl;
+    cout << "sample_settings.csv file created successfully!" << std::endl;
 }
 
 void read_settings_file() {
@@ -1931,10 +1951,10 @@ void read_settings_file() {
     return;
 }
 
-void createModeTypeFile(const std::string& fileName) {
-    std::ofstream file(fileName);
+void createModeTypeFile(const string& fileName) {
+    ofstream file(fileName);
     if (!file.is_open()) {
-        std::cerr << "Could not create the file: " << fileName << std::endl;
+        cerr << "Could not create the file: " << fileName << '\n';
         return;
     }
 
@@ -2003,15 +2023,15 @@ void read_mode_type_file() {
 // Initialize the 5D vector
 void InitializeLinkIndices(int num_modes, int no_zones, int max_routes) {
 
-    auto start = std::chrono::high_resolution_clock::now(); // Start timing
+    auto start = high_resolution_clock::now(); // Start timing
 
-    linkIndices = std::vector<std::vector<std::vector<std::vector<std::vector<int>>>>>(
-        num_modes + 1, std::vector<std::vector<std::vector<std::vector<int>>>>(
-                           no_zones + 1, std::vector<std::vector<std::vector<int>>>(
-                                             no_zones + 1, std::vector<std::vector<int>>(max_routes + 1))));
+    linkIndices = vector<vector<vector<vector<vector<int>>>>>(
+        num_modes + 1, vector<vector<vector<vector<int>>>>(
+                           no_zones + 1, vector<vector<vector<int>>>(
+                                             no_zones + 1, vector<vector<int>>(max_routes + 1))));
 
     // Record the end time
-    auto end = std::chrono::high_resolution_clock::now();
+    auto end = high_resolution_clock::now();
 
     // Calculate the duration in milliseconds
 
@@ -2019,12 +2039,12 @@ void InitializeLinkIndices(int num_modes, int no_zones, int max_routes) {
     auto duration = end - start;
 
     // Convert to hours, minutes, seconds
-    auto hours = std::chrono::duration_cast<std::chrono::hours>(duration);
-    auto minutes = std::chrono::duration_cast<std::chrono::minutes>(duration % std::chrono::hours(1));
-    auto seconds = std::chrono::duration_cast<std::chrono::seconds>(duration % std::chrono::minutes(1));
-    auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(duration % std::chrono::seconds(1));
+    auto hours = duration_cast<std::chrono::hours>(duration);
+    auto minutes = duration_cast<std::chrono::minutes>(duration % std::chrono::hours(1));
+    auto seconds = duration_cast<std::chrono::seconds>(duration % std::chrono::minutes(1));
+    auto milliseconds = duration_cast<std::chrono::milliseconds>(duration % std::chrono::seconds(1));
 
-    printf("Memory creation time for 5D link path matrix: %lld hours %lld minutes %lld seconds %lld ms\n",
+    printf("Memory creation time for 5D link path matrix: %ld hours %ld minutes %lld seconds %lld ms\n",
            hours.count(), minutes.count(), seconds.count(), milliseconds.count());
 }
 
@@ -2084,7 +2104,7 @@ int AssignmentAPI() {
     MDMinPathPredLink = (int***)Alloc_3D(number_of_modes, no_zones, no_nodes, sizeof(int));
 
     // Record the start time
-    auto start = std::chrono::high_resolution_clock::now();
+    auto start = high_resolution_clock::now();
 
     for (int k = 1; k <= number_of_links; k++) {
         MainVolume[k] = Link[k].Base_volume; // assign the base volume  to main volume
@@ -2163,12 +2183,12 @@ int AssignmentAPI() {
             fprintf(logfile, "\n");
         }
     }
-    std::chrono::duration<double, std::milli> duration_FindMinCostRoutes;
-    std::chrono::duration<double, std::milli> duration_All_or_Nothing_Assign;
-    std::chrono::duration<double, std::milli> duration_LinksSDLineSearch;
-    auto start0 = std::chrono::high_resolution_clock::now(); // Start timing
+    duration<double, std::milli> duration_FindMinCostRoutes;
+    duration<double, std::milli> duration_All_or_Nothing_Assign;
+    duration<double, std::milli> duration_LinksSDLineSearch;
+    auto start0 = high_resolution_clock::now(); // Start timing
 
-    std::vector<double> m_lambda;
+    vector<double> m_lambda;
 
     for (iteration_no = 1; iteration_no < TotalAssignIterations; iteration_no++) {
         // the one right before the assignment iteration
@@ -2183,8 +2203,8 @@ int AssignmentAPI() {
         }
 
         All_or_Nothing_Assign(iteration_no, MDODflow, MDMinPathPredLink, SubVolume); // this uees D^c, subvolume is Y,
-        auto end1 = std::chrono::high_resolution_clock::now();                       // End timing
-        auto start2 = std::chrono::high_resolution_clock::now();                     // Start timing
+        auto end1 = high_resolution_clock::now();                       // End timing
+        auto start2 = high_resolution_clock::now();                     // Start timing
 
         VolumeDifference(SubVolume, MainVolume, SDVolume); /* Which yields the search direction. SDVolume = y-X */
 
@@ -2200,7 +2220,7 @@ int AssignmentAPI() {
         // system_least_travel_time = FindMinCostRoutes(MinPathPredLink);  // the one right after the updated link cost
 
         gap = (system_wide_travel_time - system_least_travel_time) / (fmax(0.1, system_least_travel_time)) * 100;
-        auto end2 = std::chrono::high_resolution_clock::now(); // End timing
+        auto end2 = high_resolution_clock::now(); // End timing
 
         duration_LinksSDLineSearch += end2 - start2; // Compute duration in ms
 
@@ -2233,7 +2253,7 @@ int AssignmentAPI() {
     }
 
     // Record the end time
-    auto end = std::chrono::high_resolution_clock::now();
+    auto end = high_resolution_clock::now();
 
     // Calculate the duration in milliseconds
 
@@ -2241,20 +2261,20 @@ int AssignmentAPI() {
     auto duration = end - start;
 
     // Convert to hours, minutes, seconds
-    auto hours = std::chrono::duration_cast<std::chrono::hours>(duration);
-    auto minutes = std::chrono::duration_cast<std::chrono::minutes>(duration % std::chrono::hours(1));
-    auto seconds = std::chrono::duration_cast<std::chrono::seconds>(duration % std::chrono::minutes(1));
-    auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(duration % std::chrono::seconds(1));
+    auto hours = duration_cast<std::chrono::hours>(duration);
+    auto minutes = duration_cast<std::chrono::minutes>(duration % std::chrono::hours(1));
+    auto seconds = duration_cast<std::chrono::seconds>(duration % std::chrono::minutes(1));
+    auto milliseconds = duration_cast<std::chrono::milliseconds>(duration % std::chrono::seconds(1));
 
-    printf("CPU running time: %lld hours %lld minutes %lld seconds %lld ms\n", hours.count(), minutes.count(),
+    printf("CPU running time: %ld hours %ld minutes %lld seconds %lld ms\n", hours.count(), minutes.count(),
            seconds.count(), milliseconds.count());
 
     // Log the result with hours, minutes, seconds, and milliseconds
-    fprintf(summary_log_file, "CPU running time: %lld hours %lld minutes %lld seconds %lld ms\n", hours.count(),
+    fprintf(summary_log_file, "CPU running time: %ld hours %ld minutes %lld seconds %lld ms\n", hours.count(),
             minutes.count(), seconds.count(), milliseconds.count());
 
     // Compute the flow proportions (theta).
-    std::vector<double> m_theta;
+    vector<double> m_theta;
     if (m_lambda.size() == 0) {
         m_lambda.push_back(1.0);
     }
@@ -2391,9 +2411,9 @@ static void CloseODflow(void) {
 
 void ReadLinks() {
     CDTACSVParser parser_link;
-    std::vector<CLink> links;
+    vector<CLink> links;
 
-    std::string line;
+    string line;
 
     if (parser_link.OpenCSVFile("link.csv", true)) {
         float total_base_link_volume = 0;
@@ -2417,14 +2437,14 @@ void ReadLinks() {
             }
 
             if (lanes <= 0 || capacity < 0.0001 || free_speed < 0.0001) {
-                std::cerr << "Error: Invalid link attributes detected. "
+                cerr << "Error: Invalid link attributes detected. "
                           << "lanes = " << lanes << ", capacity = " << capacity << ", free_speed = " << free_speed
-                          << ". Skipping this link." << std::endl;
+                          << ". Skipping this link.\n";
                 continue;
             }
 
             Link[k].setup(number_of_modes);
-            std::string value;
+            string value;
 
             // Read link_id
             parser_link.GetValueByFieldName("from_node_id", Link[k].external_from_node_id);
@@ -2483,7 +2503,7 @@ void ReadLinks() {
                 }
 
                 for (int m = 1; m <= number_of_modes; m++) {
-                    std::string field_name = "base_vol_" + std::string(g_mode_type_vector[m].mode_type);
+                    string field_name = "base_vol_" + string(g_mode_type_vector[m].mode_type);
                     parser_link.GetValueByFieldName(field_name.c_str(), Link[k].mode_Base_Volume[m]);
                 }
             }
@@ -2510,7 +2530,7 @@ void ReadLinks() {
             if (Link[k].allowed_uses.size() > 0 && Link[k].allowed_uses != "all") {
                 for (int m = 1; m <= number_of_modes; m++) {
                     if (Link[k].allowed_uses.find(g_mode_type_vector[m].mode_type) !=
-                        std::string::npos) // otherwise, only an agent type is listed in this "allowed_uses", then this
+                        string::npos) // otherwise, only an agent type is listed in this "allowed_uses", then this
                                            // agent type is allowed to travel on this link
                     {
                         Link[k].mode_allowed_use[m] = 1; // found
@@ -2730,12 +2750,12 @@ int Read_ODtable(double*** ODtable, double*** DiffODtable, double*** target_ODta
 
         for (int m = 1; m <= number_of_modes; m++) {
             FILE* file;
-            std::string original_filename = g_mode_type_vector[m].demand_file;
-            std::string modified_filename;
+            string original_filename = g_mode_type_vector[m].demand_file;
+            string modified_filename;
 
             // Check if the original filename ends with ".csv" and replace it with "_base.csv"
             size_t pos = original_filename.find(".csv");
-            if (pos != std::string::npos) {
+            if (pos != string::npos) {
                 modified_filename = original_filename.substr(0, pos) + "_base.csv";
             }
             else {
@@ -2795,12 +2815,12 @@ int Read_ODtable(double*** ODtable, double*** DiffODtable, double*** target_ODta
     if (g_ODME_mode == 1) {
         for (int m = 1; m <= number_of_modes; m++) {
             FILE* file;
-            const std::string& original_filename = g_mode_type_vector[m].demand_file;
-            std::string modified_filename;
+            const string& original_filename = g_mode_type_vector[m].demand_file;
+            string modified_filename;
 
             // Check if the original filename ends with ".csv" and replace it with "_base.csv"
             size_t pos = original_filename.find(".csv");
-            if (pos != std::string::npos) {
+            if (pos != string::npos) {
                 modified_filename = original_filename.substr(0, pos) + "_target.csv";
             }
             else {
@@ -2914,7 +2934,7 @@ double Link_QueueVDF(int k, double Volume, double& IncomingDemand, double& DOC, 
     t0 = t2 - 0.5 * P;
     t3 = t2 + 0.5 * P;
 
-    Q_mu = std::min(Link[k].Lane_Capacity, IncomingDemand / std::max(0.01, P));
+    Q_mu = min(Link[k].Lane_Capacity, IncomingDemand / max(0.01, P));
 
     // use  as the lower speed compared to 8/15 values for the congested states
     double RTT = Link[k].length / fmax(0.01, congestion_ref_speed);
@@ -3336,38 +3356,38 @@ class SimulationLogger {
         // Always log errors to error file
         if (level == LOG_ERROR) {
             error_file << timestamp << " [ERROR] " << event << " Agent:" << agent_id << " Link:" << link_id
-                       << " Node:" << node_id << " - " << details << endl;
+                       << " Node:" << node_id << " - " << details << '\n';
         }
 
         // Detailed debugging info
         if (level <= LOG_DEBUG) {
             debug_file << timestamp << "," << getLevelString(level) << "," << event << "," << agent_id << "," << link_id
-                       << "," << node_id << "," << details << endl;
+                       << "," << node_id << "," << details << '\n';
         }
 
         // Summary information
         if (level <= LOG_INFO) {
             info_file << timestamp << "," << getLevelString(level) << "," << event << ","
-                      << "," << details << endl;
+                      << "," << details << '\n';
         }
     }
 
     void logAgentMovement(int t, int agent_id, int from_link, int to_link, const string& status) {
         if (LOG_TRACE <= current_level) {
             debug_file << t << ",TRACE,MOVE," << agent_id << "," << from_link << "->" << to_link << "," << status
-                       << endl;
+                       << '\n';
         }
     }
 
     void logQueueStatus(int t, int link_id, int entrance_size, int exit_size) {
         if (LOG_DEBUG <= current_level) {
-            debug_file << t << ",DEBUG,QUEUE," << link_id << "," << entrance_size << "," << exit_size << endl;
+            debug_file << t << ",DEBUG,QUEUE," << link_id << "," << entrance_size << "," << exit_size << '\n';
         }
     }
 
     void logSimulationStatus(int t, int loaded, int transfers, int completed) {
         if (LOG_INFO <= current_level) {
-            info_file << t << ",INFO,STATUS," << loaded << "," << transfers << "," << completed << endl;
+            info_file << t << ",INFO,STATUS," << loaded << "," << transfers << "," << completed << '\n';
         }
     }
 
@@ -3406,8 +3426,8 @@ class CAgent_Simu {
     }
 };
 
-int g_ParserIntSequence(std::string str, std::vector<int>& vect) {
-    std::stringstream ss(str);
+int g_ParserIntSequence(string str, vector<int>& vect) {
+    stringstream ss(str);
     int i;
     while (ss >> i) {
         vect.push_back(i);
@@ -3421,7 +3441,7 @@ int g_ParserIntSequence(std::string str, std::vector<int>& vect) {
 int read_vehicle_file(vector<shared_ptr<CAgent_Simu>>& agents) {
     CDTACSVParser parser_vehicle;
     if (!parser_vehicle.OpenCSVFile("vehicle.csv", true)) {
-        cerr << "Error: Cannot open vehicle.csv" << endl;
+        cerr << "Error: Cannot open vehicle.csv\n";
         return 0;
     }
 
@@ -4081,7 +4101,7 @@ double getPointToLineDistance(const GDPoint* pt, const GDPoint* fromPt, const GD
     double d1 = getEuclideanDistance(pt, &intersection);
     double d0 = getEuclideanDistance(pt, fromPt);
     double d2 = getEuclideanDistance(pt, toPt);
-    return no_intersection_requirement ? std::min({d1, d0, d2}) : d1;
+    return no_intersection_requirement ? min({d1, d0, d2}) : d1;
 }
 
 // ---------------------------------------------------------
@@ -4118,10 +4138,10 @@ struct GPSPoint {
 // ---------------------------------------------------------
 struct GridCell {
     double x, y;                                 // cell origin (e.g., lower-left)
-    std::vector<int> linkIndices;                // indices of MMLinks overlapping this cell
-    std::vector<int> OriginZoneNodeIndices;      // indices of MMLinks overlapping this cell
-    std::vector<int> DestinationZoneNodeIndices; // indices of MMLinks overlapping this cell
-    std::vector<GPSPoint> gpsPoints;             // GPS points falling in this cell
+    vector<int> linkIndices;                // indices of MMLinks overlapping this cell
+    vector<int> OriginZoneNodeIndices;      // indices of MMLinks overlapping this cell
+    vector<int> DestinationZoneNodeIndices; // indices of MMLinks overlapping this cell
+    vector<GPSPoint> gpsPoints;             // GPS points falling in this cell
     bool dwell_flag = false;
     float start_min = 1e9; // earliest GPS time (minutes) in cell
     float end_min = 0;     // latest GPS time (minutes)
@@ -4142,7 +4162,7 @@ public:
           m_FirstThruNode(first_through_node_no) {
         cols_ = static_cast<int>(std::ceil((right_ - left_) / gridRes_)) + 1;
         rows_ = static_cast<int>(std::ceil((top_ - bottom_) / gridRes_)) + 1;
-        grid_.resize(rows_, std::vector<GridCell>(cols_));
+        grid_.resize(rows_, vector<GridCell>(cols_));
         for (int r = 0; r < rows_; ++r) {
             for (int c = 0; c < cols_; ++c) {
                 grid_[r][c].x = left_ + c * gridRes_;
@@ -4164,10 +4184,10 @@ public:
     // Insert a MMLink into every cell overlapping its bounding box.
     void insertLink(int linkIndex, const GDPoint& fromPt, const GDPoint& toPt, int internal_from_node_id,
                     int internal_to_node_id) {
-        double minX = std::min(fromPt.x, toPt.x);
-        double maxX = std::max(fromPt.x, toPt.x);
-        double minY = std::min(fromPt.y, toPt.y);
-        double maxY = std::max(fromPt.y, toPt.y);
+        double minX = min(fromPt.x, toPt.x);
+        double maxX = max(fromPt.x, toPt.x);
+        double minY = min(fromPt.y, toPt.y);
+        double maxY = max(fromPt.y, toPt.y);
         int colStart = getColIndex(minX);
         int colEnd = getColIndex(maxX);
         int rowStart = getRowIndex(minY);
@@ -4196,8 +4216,8 @@ public:
         if (isValidCell(r, c)) {
             grid_[r][c].gpsPoints.push_back(gps);
             float timeMin = gps.global_time / 60.0f;
-            grid_[r][c].start_min = std::min(grid_[r][c].start_min, timeMin);
-            grid_[r][c].end_min = std::max(grid_[r][c].end_min, timeMin);
+            grid_[r][c].start_min = min(grid_[r][c].start_min, timeMin);
+            grid_[r][c].end_min = max(grid_[r][c].end_min, timeMin);
         }
     }
 
@@ -4214,8 +4234,8 @@ public:
     // 1) Mark dwell cells (if time span > 120 minutes).
     // 2) For each link in a cell, loop over GPS points and update a matching cost.
     // 3) For links with no matching GPS point, assign the closest one.
-    void processCells(const std::vector<MMLink>& links, std::vector<double>& linkGeneralCost,
-                      std::vector<int>& linkMatchingTraceNo, double nonHitDistanceRatio = 10.0) {
+    void processCells(const vector<MMLink>& links, vector<double>& linkGeneralCost,
+                      vector<int>& linkMatchingTraceNo, double nonHitDistanceRatio = 10.0) {
         // First pass: mark dwell cells.
         for (int r = 0; r < rows_; ++r) {
             for (int c = 0; c < cols_; ++c) {
@@ -4269,8 +4289,8 @@ public:
     }
 
     void printSummary() const {
-        std::cout << "MatchingGrid: " << rows_ << " rows x " << cols_ << " cols, resolution " << gridRes_ << "\n";
-        std::cout << "Bounds: x[" << left_ << ", " << right_ << "], y[" << bottom_ << ", " << top_ << "]\n";
+        cout << "MatchingGrid: " << rows_ << " rows x " << cols_ << " cols, resolution " << gridRes_ << "\n";
+        cout << "Bounds: x[" << left_ << ", " << right_ << "], y[" << bottom_ << ", " << top_ << "]\n";
     }
 
   private:
@@ -4279,34 +4299,33 @@ public:
     bool isValidCell(int r, int c) const { return r >= 0 && r < rows_ && c >= 0 && c < cols_; }
     double left_, right_, bottom_, top_, gridRes_;
     int rows_, cols_;
-    std::vector<std::vector<GridCell>> grid_;
+    vector<vector<GridCell>> grid_;
 };
 
 // Define a structure to hold trace record information.
 struct TraceRecord {
     int trace_no = 0;
-    std::string trace_id = "";
-    std::string allowed_link_type_code = "";
-    std::string blocked_link_type_code = "";
+    string trace_id = "";
+    string allowed_link_type_code = "";
+    string blocked_link_type_code = "";
     double y_coord = 0.0;
     double x_coord = 0.0;
     int road_order = 0;
     double reference_speed = 0.0;
-    std::string agent_id = "";
+    string agent_id = "";
     int internal_road_order = 0;
     int o_node_id = -1;
     int d_node_id = -1;
 };
 
 // Here we change the parameter to a nested map:
-// Outer key: agent_id (std::string)
+// Outer key: agent_id (string)
 // Inner key: trace_no (int)
 // Value: vector of GPSPoints that belong to that trace.
-int readGPSTraceFile(std::unordered_map<std::string, std::vector<GPSPoint>>& gpsTraces)
-
+int readGPSTraceFile(unordered_map<string, vector<GPSPoint>>& gpsTraces)
 {
     CDTACSVParser parser_trace;
-    std::vector<TraceRecord> traceRecords;
+    vector<TraceRecord> traceRecords;
 
     // Open the CSV file (the second parameter 'true' indicates that the file contains headers)
     if (parser_trace.OpenCSVFile("trace.csv", true)) {
@@ -4332,7 +4351,7 @@ int readGPSTraceFile(std::unordered_map<std::string, std::vector<GPSPoint>>& gps
         parser_trace.CloseCSVFile();
     }
     else {
-        std::cerr << "Error: Cannot open trace.csv" << std::endl;
+        cerr << "Error: Cannot open trace.csv\n";
         std::exit(1);
     }
 
@@ -4353,14 +4372,14 @@ int readGPSTraceFile(std::unordered_map<std::string, std::vector<GPSPoint>>& gps
 
 // Helper: Compute Euclidean distance between two points.
 inline double computeEuclideanDistance(const GDPoint& a, const GDPoint& b) {
-    return std::sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y));
+    return sqrt((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y));
 }
 
 // Given a set of candidate zone node IDs (from a grid cell) and a point,
 // return the candidate whose coordinate is closest.
 // zoneNodeCoords: a mapping from zone node id to its coordinate.
-int determineZoneNode(const std::vector<int>& candidateNodeIds, const GDPoint& avgPt,
-                      const std::map<int, GDPoint>& zoneNodeCoords) {
+int determineZoneNode(const vector<int>& candidateNodeIds, const GDPoint& avgPt,
+                      const map<int, GDPoint>& zoneNodeCoords) {
     double minDist = std::numeric_limits<double>::max();
     int bestNode = -1;
     for (int nodeId : candidateNodeIds) {
@@ -4384,8 +4403,8 @@ int determineZoneNode(const std::vector<int>& candidateNodeIds, const GDPoint& a
 // - zoneNodeCoords: mapping from zone node id to its GDPoint (x,y) coordinate.
 // - numPointsToAverage: number of points from the start/end to average.
 // - originNodeId & destinationNodeId: outputs.
-void determineOriginDestinationNodes(const std::vector<GPSPoint>& trace, const MatchingGrid& grid,
-                                     const std::map<int, GDPoint>& zoneNodeCoords, int numPointsToAverage,
+void determineOriginDestinationNodes(const vector<GPSPoint>& trace, const MatchingGrid& grid,
+                                     const map<int, GDPoint>& zoneNodeCoords, int numPointsToAverage,
                                      int& originNodeId, int& destinationNodeId) {
     if (trace.empty()) {
         originNodeId = -1;
@@ -4395,7 +4414,7 @@ void determineOriginDestinationNodes(const std::vector<GPSPoint>& trace, const M
 
     // Average first numPointsToAverage GPS points for the origin.
     GDPoint avgOrigin = {0, 0};
-    int countOrigin = std::min(numPointsToAverage, static_cast<int>(trace.size()));
+    int countOrigin = min(numPointsToAverage, static_cast<int>(trace.size()));
     for (int i = 0; i < countOrigin; ++i) {
         avgOrigin.x += trace[i].pt.x;
         avgOrigin.y += trace[i].pt.y;
@@ -4405,7 +4424,7 @@ void determineOriginDestinationNodes(const std::vector<GPSPoint>& trace, const M
 
     // Average last numPointsToAverage GPS points for the destination.
     GDPoint avgDest = {0, 0};
-    int countDest = std::min(numPointsToAverage, static_cast<int>(trace.size()));
+    int countDest = min(numPointsToAverage, static_cast<int>(trace.size()));
     for (int i = static_cast<int>(trace.size()) - countDest; i < static_cast<int>(trace.size()); ++i) {
         avgDest.x += trace[i].pt.x;
         avgDest.y += trace[i].pt.y;
@@ -4469,7 +4488,7 @@ int mapmatchingAPI() {
     using namespace MapMatching;
 
     // Create some MMLinks.
-    std::vector<MMLink> mmLinks;
+    vector<MMLink> mmLinks;
 
     for (int k = 1; k <= number_of_links; k++) {
         double from_x, from_y, to_x, to_y;
@@ -4485,10 +4504,10 @@ int mapmatchingAPI() {
     // Compute overall boundaries from all MMLink endpoints.
     double left = 1e9, right = -1e9, bottom = 1e9, top = -1e9;
     for (const auto& L : mmLinks) {
-        left = std::min({left, L.fromPt.x, L.toPt.x});
-        right = std::max({right, L.fromPt.x, L.toPt.x});
-        bottom = std::min({bottom, L.fromPt.y, L.toPt.y});
-        top = std::max({top, L.fromPt.y, L.toPt.y});
+        left = min({left, L.fromPt.x, L.toPt.x});
+        right = max({right, L.fromPt.x, L.toPt.x});
+        bottom = min({bottom, L.fromPt.y, L.toPt.y});
+        top = max({top, L.fromPt.y, L.toPt.y});
     }
 
     // Build the matching grid.
@@ -4498,13 +4517,13 @@ int mapmatchingAPI() {
         mGrid.insertLink(static_cast<int>(i), mmLinks[i].fromPt, mmLinks[i].toPt, mmLinks[i].external_from_node_id,
                          mmLinks[i].external_to_node_id);
     }
-    std::unordered_map<std::string, std::vector<GPSPoint>> gpsTraces;
-    std::unordered_map<std::string, int> gpsTraces_originNodeId;
-    std::unordered_map<std::string, int> gpsTraces_destinationNodeId;
-    std::unordered_map<std::string, int> gpsTraces_RouteId;
+    unordered_map<string, vector<GPSPoint>> gpsTraces;
+    unordered_map<string, int> gpsTraces_originNodeId;
+    unordered_map<string, int> gpsTraces_destinationNodeId;
+    unordered_map<string, int> gpsTraces_RouteId;
     readGPSTraceFile(gpsTraces);
 
-    std::map<int, GDPoint> zoneNodeCoords;
+    map<int, GDPoint> zoneNodeCoords;
 
     for (int i = 0; i < FirstThruNode; i++) // TAZ centriod only
     {
@@ -4514,8 +4533,8 @@ int mapmatchingAPI() {
         zoneNodeCoords[g_node_vector[i].node_id] = pt;
     }
 
-    std::vector<std::vector<std::vector<int>>> ODRouteIndices(no_zones + 1,
-                                                              std::vector<std::vector<int>>(no_zones + 1));
+    vector<vector<vector<int>>> ODRouteIndices(no_zones + 1,
+                                                              vector<vector<int>>(no_zones + 1));
     // ------------------------
     // Insert GPS points into the grid.
     // ------------------------
@@ -4525,12 +4544,12 @@ int mapmatchingAPI() {
     for (const auto& agentPair : gpsTraces) {
 
         mGrid.cleanGPSPoint();
-        const std::string& agentId = agentPair.first;
+        const string& agentId = agentPair.first;
 
-        std::vector<GPSPoint> gpsPoints;
+        vector<GPSPoint> gpsPoints;
         gpsPoints = agentPair.second;
         // Optionally, you might want to print or log the agent and trace information:
-        // std::cout << "Processing agent " << agentId << ", trace " << traceNo << std::endl;
+        // cout << "Processing agent " << agentId << ", trace " << traceNo << std::endl;
         for (const auto& gps : gpsPoints) {
             mGrid.insertGPSPoint(gps, gps.pt);
         }
@@ -4555,20 +4574,20 @@ int mapmatchingAPI() {
 
     for (const auto& agentPair : gpsTraces) {
         mGrid.cleanGPSPoint();
-        const std::string& agentId = agentPair.first;
+        const string& agentId = agentPair.first;
 
-        std::vector<GPSPoint> gpsPoints;
+        vector<GPSPoint> gpsPoints;
         gpsPoints = agentPair.second;
         // Optionally, you might want to print or log the agent and trace information:
-        // std::cout << "Processing agent " << agentId << ", trace " << traceNo << std::endl;
+        // cout << "Processing agent " << agentId << ", trace " << traceNo << std::endl;
         for (const auto& gps : gpsPoints) {
             mGrid.insertGPSPoint(gps, gps.pt);
         }
         // ------------------------
         // Prepare arrays for each MMLink’s cost and matching trace number.
         // ------------------------
-        std::vector<double> linkGeneralCost(mmLinks.size(), DEFAULT_GRID_RESOLUTION);
-        std::vector<int> linkMatchingTraceNo(mmLinks.size(), -1);
+        vector<double> linkGeneralCost(mmLinks.size(), DEFAULT_GRID_RESOLUTION);
+        vector<int> linkMatchingTraceNo(mmLinks.size(), -1);
 
         // Process the grid cells.
         mGrid.processCells(mmLinks, linkGeneralCost, linkMatchingTraceNo);
@@ -4581,7 +4600,7 @@ int mapmatchingAPI() {
         if (gpsTraces_originNodeId[agentId] >= 1 && gpsTraces_destinationNodeId[agentId] >= 1) {
             int Orig = gpsTraces_originNodeId[agentId];
             int Dest = gpsTraces_destinationNodeId[agentId];
-            std::vector<int> currentLinkSequence; // Temporary vector to store link indices
+            vector<int> currentLinkSequence; // Temporary vector to store link indices
 
             int m = 1;
             Minpath(m, Orig, MDMinPathPredLink[m][Orig], CostTo[Orig]);
@@ -4613,7 +4632,7 @@ int mapmatchingAPI() {
         }
     }
 
-    std::vector<double> m_theta;
+    vector<double> m_theta;
     OutputRouteDetails("route_assignment.csv", m_theta);
 
     Free_3D((void***)MDMinPathPredLink, number_of_modes, no_zones, no_nodes);
