@@ -22,6 +22,16 @@ static double LastLambda = 1.0;
 std::map<int, int> g_map_external_node_id_2_node_seq_no;
 std::map<int, int> g_map_node_seq_no_2_external_node_id;
 
+struct CLink {
+    int link_id;
+    int internal_from_node_id;
+    int internal_to_node_id;
+    int length;
+    int lanes;
+    double capacity;
+    int free_speed;
+};
+
 class CDTACSVParser {
   public:
     char Delimiter;
@@ -56,16 +66,16 @@ class CDTACSVParser {
     void CloseCSVFile() { inFile.close(); }
 
     void ConvertLineStringValueToIntegers();
-    bool OpenCSVFile(std::string fileName, bool b_required);
+    bool OpenCSVFile(const std::string& fileName, bool b_required);
     bool ReadRecord();
-    bool ReadSectionHeader(std::string s);
+    bool ReadSectionHeader(const std::string& s);
     bool ReadRecord_Section();
-    std::vector<std::string> ParseLine(std::string line);
-    bool GetValueByFieldName(std::string field_name, std::string& value, bool required_field = true);
+    std::vector<std::string> ParseLine(std::string& line);
+    bool GetValueByFieldName(const std::string& field_name, std::string& value, bool required_field = true);
     template <class T>
-    bool GetValueByFieldName(std::string field_name, T& value, bool required_field = true, bool NonnegativeFlag = true);
+    bool GetValueByFieldName(const std::string& field_name, T& value, bool required_field = true, bool NonnegativeFlag = true);
     template <class T>
-    bool GetValueByKeyName(std::string field_name, T& value, bool required_field = true, bool NonnegativeFlag = true);
+    bool GetValueByKeyName(const std::string& field_name, T& value, bool required_field = true, bool NonnegativeFlag = true);
 };
 
 // definitions of CDTACSVParser member functions
@@ -81,8 +91,7 @@ void CDTACSVParser::ConvertLineStringValueToIntegers() {
     }
 }
 
-bool CDTACSVParser::OpenCSVFile(std::string fileName, bool b_required) {
-    mFileName = fileName;
+bool CDTACSVParser::OpenCSVFile(const std::string& fileName, bool b_required) {
     inFile.open(fileName.c_str());
 
     if (inFile.is_open()) {
@@ -102,7 +111,7 @@ bool CDTACSVParser::OpenCSVFile(std::string fileName, bool b_required) {
                 else {
                     name = tmp_str.substr(start);
                 }
-                FieldsIndices[name] = (int)i;
+                FieldsIndices[name] =  static_cast<int>(i);
             }
         }
         return true;
@@ -118,7 +127,7 @@ bool CDTACSVParser::ReadRecord() {
     if (inFile.is_open()) {
         std::string s;
         std::getline(inFile, s);
-        if (s.length() > 0) {
+        if (!s.empty()) {
             LineFieldsValue = ParseLine(s);
             return true;
         }
@@ -131,11 +140,11 @@ bool CDTACSVParser::ReadRecord() {
     }
 }
 
-std::vector<std::string> CDTACSVParser::ParseLine(std::string line) {
+std::vector<std::string> CDTACSVParser::ParseLine(std::string& line) {
     std::vector<std::string> SeperatedStrings;
     std::string subStr;
 
-    if (line.length() == 0) {
+    if (line.empty()) {
         return SeperatedStrings;
     }
 
@@ -151,7 +160,7 @@ std::vector<std::string> CDTACSVParser::ParseLine(std::string line) {
         }
     }
     else {
-        while (line.length() > 0) {
+        while (!line.empty()) {
             size_t n1 = line.find_first_of(',');
             size_t n2 = line.find_first_of('"');
 
@@ -206,22 +215,22 @@ std::vector<std::string> CDTACSVParser::ParseLine(std::string line) {
     return SeperatedStrings;
 }
 
-bool CDTACSVParser::GetValueByFieldName(std::string field_name, std::string& value, bool required_field) {
+bool CDTACSVParser::GetValueByFieldName(const std::string& field_name, std::string& value, bool required_field) {
     if (FieldsIndices.find(field_name) == FieldsIndices.end()) {
         return false;
     }
     else {
-        if (LineFieldsValue.size() == 0) {
+        if (LineFieldsValue.empty()) {
             return false;
         }
 
-        unsigned int index = FieldsIndices[field_name];
-        if (index >= LineFieldsValue.size()) {
+        int idx = FieldsIndices[field_name];
+        if (idx >= LineFieldsValue.size()) {
             return false;
         }
-        std::string str_value = LineFieldsValue[index];
 
-        if (str_value.length() <= 0) {
+        const std::string& str_value = LineFieldsValue[idx];
+        if (str_value.empty()) {
             return false;
         }
 
@@ -233,23 +242,22 @@ bool CDTACSVParser::GetValueByFieldName(std::string field_name, std::string& val
 // Peiheng, 03/22/21, to avoid implicit instantiations in flash_dta.cpp and main_api.cpp for this
 // template function only all the other non-inline functions are implemented in utils.cpp
 template <class T>
-bool CDTACSVParser::GetValueByFieldName(std::string field_name, T& value, bool required_field, bool NonnegativeFlag) {
+bool CDTACSVParser::GetValueByFieldName(const std::string& field_name, T& value, bool required_field, bool NonnegativeFlag) {
     if (FieldsIndices.find(field_name) == FieldsIndices.end()) {
         return false;
     }
     else {
-        if (LineFieldsValue.size() == 0) {
+        if (LineFieldsValue.empty()) {
             return false;
         }
 
-        int size = (int)(LineFieldsValue.size());
-        if (FieldsIndices[field_name] >= size) {
+        int sz = static_cast<int>(LineFieldsValue.size());
+        if (FieldsIndices[field_name] >= sz) {
             return false;
         }
 
-        std::string str_value = LineFieldsValue[FieldsIndices[field_name]];
-
-        if (str_value.length() <= 0) {
+        const std::string& str_value = LineFieldsValue[FieldsIndices[field_name]];
+        if (str_value.empty()) {
             return false;
         }
 
@@ -268,7 +276,7 @@ bool CDTACSVParser::GetValueByFieldName(std::string field_name, T& value, bool r
 }
 
 void ExitMessage(const char* format, ...) {
-    printf('\n');
+    printf("\n");
     getchar();
 
     exit(EXIT_FAILURE);
@@ -277,7 +285,7 @@ void ExitMessage(const char* format, ...) {
 // Function to allocate a 1D array
 void* Alloc_1D(int dim1, size_t size) {
     void* Array = (void*)calloc(dim1 + 1, size);
-    if (Array == NULL) {
+    if (!Array) {
         ExitMessage("Cannot allocate memory for single dimension array of size %d.\n", dim1);
     }
     return Array;
@@ -286,15 +294,13 @@ void* Alloc_1D(int dim1, size_t size) {
 // Function to allocate a 2D array
 void** Alloc_2D(int dim1, int dim2, size_t size) {
     void** Array = (void**)calloc(dim1 + 1, sizeof(void*));
-    int i; // Loop variable declared outside for efficiency
-
-    if (Array == NULL) {
+    if (!Array) {
         ExitMessage("Cannot allocate memory for two-dimensional array of size %d by %d.\n", dim1, dim2);
     }
 
-    for (i = 0; i <= dim1; i++) {
+    for (int i = 0; i <= dim1; i++) {
         Array[i] = (void*)calloc(dim2 + 1, size);
-        if (Array[i] == NULL) {
+        if (!Array[i]) {
             ExitMessage("Cannot allocate memory for two-dimensional array of size %d by %d.\n", dim1, dim2);
         }
     }
@@ -303,9 +309,7 @@ void** Alloc_2D(int dim1, int dim2, size_t size) {
 
 // Function to free a 2D array
 void Free_2D(void** Array, int dim1, int dim2) {
-    int i; // Loop variable declared outside for efficiency
-
-    for (i = 0; i <= dim1; i++) {
+    for (int i = 0; i <= dim1; i++) {
         free(Array[i]);
     }
     free(Array);
@@ -314,21 +318,19 @@ void Free_2D(void** Array, int dim1, int dim2) {
 // Function to allocate a 3D array
 void*** Alloc_3D(int dim1, int dim2, int dim3, size_t size) {
     void*** Array = (void***)calloc(dim1 + 1, sizeof(void**));
-    int i, j; // Loop variables declared outside for efficiency
-
-    if (Array == NULL) {
+    if (!Array) {
         ExitMessage("Cannot allocate memory for three-dimensional array of size %d by %d by %d.\n", dim1, dim2, dim3);
     }
 
-    for (i = 0; i <= dim1; i++) {
+    for (int i = 0; i <= dim1; i++) {
         Array[i] = (void**)calloc(dim2 + 1, sizeof(void*));
-        if (Array[i] == NULL) {
+        if (!Array[i]) {
             ExitMessage("Cannot allocate memory for two-dimensional array of size %d by %d.\n", dim1, dim2);
         }
 
-        for (j = 0; j <= dim2; j++) {
+        for (int j = 0; j <= dim2; j++) {
             Array[i][j] = (void*)calloc(dim3 + 1, size);
-            if (Array[i][j] == NULL) {
+            if (!Array[i][j]) {
                 ExitMessage("Cannot allocate memory for one-dimensional array of size %d.\n", dim3);
             }
         }
@@ -338,14 +340,10 @@ void*** Alloc_3D(int dim1, int dim2, int dim3, size_t size) {
 
 // Function to free a 3D array
 void Free_3D(void*** Array, int dim1, int dim2, int dim3) {
-    int i, j; // Loop variables declared outside for efficiency
-    void* p;  // Pointer variable declared outside the loop for efficiency
-
     // Free the innermost arrays (1D arrays)
-    for (i = 0; i <= dim1; i++) {
-        for (j = 0; j < dim2; j++) {
-            p = Array[i][j];
-            free(p);
+    for (int i = 0; i <= dim1; i++) {
+        for (int j = 0; j < dim2; j++) {
+            free(Array[i][j]);
         }
         // Free the 2D array (array of pointers to 1D arrays)
         free(Array[i]);
@@ -354,15 +352,5 @@ void Free_3D(void*** Array, int dim1, int dim2, int dim3) {
     // Free the outermost array (array of pointers to 2D arrays)
     free(Array);
 }
-
-struct CLink {
-    int link_id;
-    int internal_from_node_id;
-    int internal_to_node_id;
-    int length;
-    int lanes;
-    double capacity;
-    int free_speed;
-};
 
 #endif

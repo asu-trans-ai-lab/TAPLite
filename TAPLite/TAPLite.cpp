@@ -34,7 +34,9 @@
 using namespace std;
 
 #ifndef _WIN32
-void fopen_s(FILE** file, const char* fileName, const char* mode) { *file = fopen(fileName, mode); }
+void fopen_s(FILE** file, const char* fileName, const char* mode) { 
+    *file = fopen(fileName, mode); 
+}
 #endif
 
 struct link_record {
@@ -141,11 +143,23 @@ struct mode_type {
     std::string demand_file;
 };
 
+class Node {
+    public:
+      int node_id;
+      double x, y;
+      vector<int> m_incoming_link_seq_no_vector;
+      vector<int> m_outgoing_link_seq_no_vector;
+  
+      Node() : node_id(-1) {}
+ };
+
 mode_type g_mode_type_vector[MAX_MODE_TYPES];
 int g_metric_system_flag = 0;
 void StatusMessage(const char* group, const char* format, ...);
 
-struct link_record* Link;
+link_record* Link;
+vector<Node> g_node_vector;
+
 int* FirstLinkFrom; // used in shortest path algorithm
 int* LastLinkFrom;
 FILE* summary_log_file;
@@ -235,18 +249,6 @@ double Link_QueueVDF(int k, double Volume, double& IncomingDemand, double& DOC, 
                      double& t3, double& vt2, double& Q_mu, double& Q_gamma, double& congestion_ref_speed,
                      double& avg_queue_speed, double& avg_QVDF_period_speed, double& Severe_Congestion_P,
                      double model_speed[300]);
-
-class Node {
-  public:
-    int node_id;
-    double x, y;
-    vector<int> m_incoming_link_seq_no_vector;
-    vector<int> m_outgoing_link_seq_no_vector;
-
-    Node() : node_id(-1) {}
-};
-
-vector<Node> g_node_vector;
 
 int Minpath(int mode, int Orig, int* PredLink, double* CostTo) {
     int node, now, NewNode, k, Return2Q_Count = 0;
@@ -425,7 +427,7 @@ double FindMinCostRoutes(int*** MinPathPredLink) {
 std::vector<std::vector<std::vector<std::vector<std::vector<int>>>>> linkIndices;
 
 void AddLinkSequence(int m, int Orig, int Dest, int route_id, const std::vector<int>& linkIDs) {
-    if (linkIndices.size() == 0) {
+    if (linkIndices.empty()) {
         return;
     }
 
@@ -680,7 +682,7 @@ std::vector<double> computeTheta(const std::vector<double>& lambda) {
 
     return theta;
 }
-void performODME(std::vector<double> theta, double* MainVolume, struct link_record* Link) {
+void performODME(const std::vector<double>& theta, double* MainVolume, struct link_record* Link) {
     // Open log file (this will overwrite any existing file with the same name)
     std::ofstream logFile("ODME_log.txt");
     if (!logFile.is_open()) {
@@ -742,8 +744,8 @@ void performODME(std::vector<double> theta, double* MainVolume, struct link_reco
         }
         // Compute total VMT
         double VMT = 0.0;
-        for (size_t l = 0; l < linkFlows.size(); ++l) {
-            VMT += linkFlows[l] * Link[l].length;
+        for (size_t i = 0; i < linkFlows.size(); ++i) {
+            VMT += linkFlows[i] * Link[i].length;
         }
         // Sum up the objective terms
         double obj = 0.0;
@@ -760,9 +762,9 @@ void performODME(std::vector<double> theta, double* MainVolume, struct link_reco
             }
         }
         // Link flow term:
-        for (size_t l = 0; l < linkFlows.size(); ++l) {
-            if (Link[l].Obs_volume > 1) {
-                double diff = linkFlows[l] - Link[l].Obs_volume;
+        for (size_t i = 0; i < linkFlows.size(); ++i) {
+            if (Link[i].Obs_volume > 1) {
+                double diff = linkFlows[i] - Link[i].Obs_volume;
                 obj += w_link * diff * diff;
             }
         }
@@ -832,9 +834,9 @@ void performODME(std::vector<double> theta, double* MainVolume, struct link_reco
             }
             double totalLinkDev = 0.0;
             int linkCount = 0;
-            for (size_t l = 0; l < linkFlows.size(); ++l) {
-                if (Link[l].Obs_volume > 1) {
-                    totalLinkDev += std::fabs(linkFlows[l] - Link[l].Obs_volume);
+            for (size_t i = 0; i < linkFlows.size(); ++i) {
+                if (Link[i].Obs_volume > 1) {
+                    totalLinkDev += std::fabs(linkFlows[i] - Link[i].Obs_volume);
                     linkCount++;
                 }
             }
@@ -842,8 +844,8 @@ void performODME(std::vector<double> theta, double* MainVolume, struct link_reco
 
             // VMT deviation: compute total VMT and its deviation from target
             double VMT = 0.0;
-            for (size_t l = 0; l < linkFlows.size(); ++l) {
-                VMT += linkFlows[l] * Link[l].length;
+            for (size_t i = 0; i < linkFlows.size(); ++i) {
+                VMT += linkFlows[i] * Link[i].length;
             }
             double vmtDev = (VMT_target > 0 ? (VMT - VMT_target) : 0.0);
 
@@ -996,9 +998,9 @@ void performODME(std::vector<double> theta, double* MainVolume, struct link_reco
                 }
             }
         }
-        for (size_t l = 0; l < linkFlows.size(); ++l) {
-            MainVolume[l] = linkFlows[l];
-            Link[l].mode_MainVolume[m] = mode_linkFlows[m][l];
+        for (size_t i = 0; i < linkFlows.size(); ++i) {
+            MainVolume[i] = linkFlows[i];
+            Link[i].mode_MainVolume[m] = mode_linkFlows[m][i];
         }
     }
     logFile << "ODME process finished.\n";
@@ -1081,8 +1083,8 @@ void performODME_2(std::vector<double> theta, double* MainVolume, struct link_re
 
         // 2. Compute total VMT from current link flows.
         double VMT = 0.0;
-        for (size_t l = 0; l < linkFlows.size(); ++l) {
-            VMT += linkFlows[l] * Link[l].length;
+        for (size_t i = 0; i < linkFlows.size(); ++i) {
+            VMT += linkFlows[i] * Link[i].length;
         }
         double total_obj_deviation = 0;
         double total_obj_link_deviation = 0;
@@ -1135,16 +1137,16 @@ void performODME_2(std::vector<double> theta, double* MainVolume, struct link_re
             double maxLinkDev = 0.0;
             double sumLinkDev = 0.0;
             int countLinks = 0;
-            for (size_t l = 0; l < linkFlows.size(); ++l) {
-                if (Link[l].Obs_volume > 1) {
-                    double dev = std::fabs(linkFlows[l] - Link[l].Obs_volume);
+            for (size_t i = 0; i < linkFlows.size(); ++i) {
+                if (Link[i].Obs_volume > 1) {
+                    double dev = std::fabs(linkFlows[i] - Link[i].Obs_volume);
                     maxLinkDev = std::max(maxLinkDev, dev);
                     sumLinkDev += dev;
                     total_obj_deviation += dev;
                     total_obj_link_deviation += dev;
-                    logFile << "Link " << l << ": "
-                            << "Computed Flow = " << linkFlows[l] << ", "
-                            << "Observed Volume = " << Link[l].Obs_volume << ", "
+                    logFile << "Link " << i << ": "
+                            << "Computed Flow = " << linkFlows[i] << ", "
+                            << "Observed Volume = " << Link[i].Obs_volume << ", "
                             << "Deviation = " << dev << ", "
                             << "Max Deviation so far = " << maxLinkDev << "\n";
                     countLinks++;
@@ -1254,7 +1256,6 @@ void performODME_2(std::vector<double> theta, double* MainVolume, struct link_re
     std::vector<double> linkFlows(number_of_links + 1, 0.0);
     std::vector<std::vector<double>> mode_linkFlows(numModes + 1, std::vector<double>(number_of_links + 1, 0.0));
     for (int m = 1; m <= numModes; ++m) {
-
         for (int Orig = 1; Orig <= numZones; ++Orig) {
             for (int Dest = 1; Dest <= numZones; ++Dest) {
                 if (Orig == Dest) {
@@ -1293,9 +1294,9 @@ void performODME_2(std::vector<double> theta, double* MainVolume, struct link_re
                 }
             }
         }
-        for (size_t l = 0; l < linkFlows.size(); ++l) {
-            MainVolume[l] = linkFlows[l];
-            Link[l].mode_MainVolume[m] = mode_linkFlows[m][l];
+        for (size_t i = 0; i < linkFlows.size(); ++i) {
+            MainVolume[i] = linkFlows[i];
+            Link[i].mode_MainVolume[m] = mode_linkFlows[m][i];
         }
     }
     logFile.close();
@@ -1314,10 +1315,10 @@ struct RouteData {
     std::string routeKey;        // Unique key (e.g., based on node and link sums)
 };
 
-void OutputRouteDetails(const std::string& filename, std::vector<double> theta) {
+void OutputRouteDetails(const std::string& filename, const std::vector<double>& theta) {
     std::ofstream outputFile(filename); // Open the file for writing
 
-    if (linkIndices.size() == 0) {
+    if (linkIndices.empty()) {
         return;
     }
     // Write the CSV header in lowercase
@@ -1483,13 +1484,13 @@ std::vector<double> calculate_departure_time(double T0, double T1, double T3, do
 
     return departure_times;
 }
-void OutputVehicleDetails(const std::string& filename, std::vector<double> theta) {
+void OutputVehicleDetails(const std::string& filename, const std::vector<double>& theta) {
     // Record the start time
     auto start = std::chrono::high_resolution_clock::now();
 
     std::ofstream outputFile(filename); // Open the file for writing
 
-    if (linkIndices.size() == 0) {
+    if (linkIndices.empty()) {
         return;
     }
     // Write the CSV header in lowercase
@@ -1901,7 +1902,6 @@ void createSettingsFile(const std::string& fileName) {
 }
 
 void read_settings_file() {
-
     createSettingsFile("sample_settings.csv");
 
     CDTACSVParser parser_settings;
@@ -2049,7 +2049,7 @@ int AssignmentAPI() {
             no_nodes, no_zones, FirstThruNode, number_of_links);
 
     fopen_s(&link_performance_file, "link_performance.csv", "w");
-    if (link_performance_file == NULL) {
+    if (!link_performance_file) {
         printf("Error opening file!\n");
         return 1;
     }
@@ -2138,10 +2138,6 @@ int AssignmentAPI() {
     system_wide_travel_time = UpdateLinkCost(MainVolume);
     double gap = (system_wide_travel_time - system_least_travel_time) / (fmax(0.1, system_least_travel_time)) * 100;
 
-    if (gap < 0) {
-        int ii = 0;
-    }
-
     printf("iter No = %d, sys. TT =  %lf, least TT =  %lf, gap = %f %%\n", iteration_no, system_wide_travel_time,
            system_least_travel_time, gap);
     fprintf(summary_log_file, "iter No = %d, sys. TT =  %lf, least TT =  %lf, gap = %f %%\n", iteration_no,
@@ -2175,14 +2171,13 @@ int AssignmentAPI() {
     std::vector<double> m_lambda;
 
     for (iteration_no = 1; iteration_no < TotalAssignIterations; iteration_no++) {
-        system_least_travel_time =
-            FindMinCostRoutes(MDMinPathPredLink); // the one right before the assignment iteration
+        // the one right before the assignment iteration
+        system_least_travel_time = FindMinCostRoutes(MDMinPathPredLink); 
 
         g_System_VMT = 0;
-
         for (int k = 1; k <= number_of_links; k++) {
-            if (Link[k].link_type >= 1) // only include physical links
-            {
+            // only include physical links
+            if (Link[k].link_type >= 1) {
                 g_System_VMT += MainVolume[k] * Link[k].length;
             }
         }
@@ -2208,10 +2203,6 @@ int AssignmentAPI() {
         auto end2 = std::chrono::high_resolution_clock::now(); // End timing
 
         duration_LinksSDLineSearch += end2 - start2; // Compute duration in ms
-
-        if (gap < 0) {
-            int ii = 0;
-        }
 
         printf("iter No = %d, Lambda = %f, g_System_VMT = %.1f, sys. TT =  %.1f, least TT =  %.1f, gap = %f %%\n",
                iteration_no, Lambda, g_System_VMT, system_wide_travel_time, system_least_travel_time, gap);
@@ -2284,7 +2275,6 @@ int AssignmentAPI() {
     }
 
     for (int k = 1; k <= number_of_links; k++) {
-
         double P = 0;
         double vt2 = Link[k].Cutoff_Speed;
         double mu = Link[k].Lane_Capacity;
@@ -2302,13 +2292,12 @@ int AssignmentAPI() {
         Link_QueueVDF(k, MainVolume[k], IncomingDemand, DOC, P, t0, t2, t3, vt2, mu, Q_gamma, congestion_ref_speed,
                       avg_queue_speed, avg_QVDF_period_speed, Severe_Congestion_P, model_speed);
 
-        double VMT, VHT, PMT, PHT, VHT_QVDF, PHT_QVDF;
-        VMT = 0;
-        VHT = 0;
-        PMT = 0;
-        PHT = 0;
-        VHT_QVDF = 0;
-        PHT_QVDF = 0;
+        double VMT = 0;
+        double VHT = 0;
+        double PMT = 0;
+        double PHT = 0;
+        double VHT_QVDF = 0;
+        double PHT_QVDF = 0;
         for (int m = 1; m <= number_of_modes; m++) {
             VMT += MainVolume[k] * Link[k].length;
             VHT += MainVolume[k] * Link[k].Travel_time / 60.0;
@@ -2391,7 +2380,6 @@ static void Close() {
 }
 
 static void CloseODflow(void) {
-
     free(TotalOFlow);
 
     Free_3D((void***)MDODflow, number_of_modes, no_zones, no_zones);
@@ -2402,7 +2390,6 @@ static void CloseODflow(void) {
 }
 
 void ReadLinks() {
-
     CDTACSVParser parser_link;
     std::vector<CLink> links;
 
@@ -2417,7 +2404,6 @@ void ReadLinks() {
         while (parser_link.ReadRecord()) // if this line contains [] mark, then we will also read
                                          // field headers.
         {
-            // CLink link;
             int lanes = 1;
             float capacity = 0;
             float free_speed = 10;
@@ -2535,12 +2521,6 @@ void ReadLinks() {
                 }
             }
 
-            // Read internal_from_node_id
-
-            // Read length
-
-            // Read capacity
-
             Link[k].FreeTravelTime = Link[k].length / free_speed * 60.0;
 
             parser_link.GetValueByFieldName("VDF_alpha", Link[k].VDF_Alpha);
@@ -2568,9 +2548,8 @@ void ReadLinks() {
             parser_link.GetValueByFieldName("VDF_s", Link[k].Q_s);
 
             Link[k].free_speed = free_speed;
-            Link[k].Cutoff_Speed =
-                free_speed *
-                0.75; // use 0.75 as default ratio, when free_speed = 70 mph, Cutoff_Speed = 52.8 mph in I-10 data set
+            // use 0.75 as default ratio, when free_speed = 70 mph, Cutoff_Speed = 52.8 mph in I-10 data set
+            Link[k].Cutoff_Speed = free_speed * 0.75; 
             parser_link.GetValueByFieldName("geometry", Link[k].geometry, false);
             k++;
         }
@@ -2814,10 +2793,9 @@ int Read_ODtable(double*** ODtable, double*** DiffODtable, double*** target_ODta
     // ODME mode
 
     if (g_ODME_mode == 1) {
-
         for (int m = 1; m <= number_of_modes; m++) {
             FILE* file;
-            std::string original_filename = g_mode_type_vector[m].demand_file;
+            const std::string& original_filename = g_mode_type_vector[m].demand_file;
             std::string modified_filename;
 
             // Check if the original filename ends with ".csv" and replace it with "_base.csv"
@@ -2943,8 +2921,8 @@ double Link_QueueVDF(int k, double Volume, double& IncomingDemand, double& DOC, 
     double wt2 = Link[k].length / vt2 - RTT; // in hour
 
     // step 5 compute gamma parameter is controlled by the maximum queue
-    Q_gamma =
-        wt2 * 64 * Q_mu / pow(P, 4); // because q_tw = w*mu =1/4 * gamma (P/2)^4, => 1/vt2 * mu = 1/4 * gamma  * (P/2)^4
+    // because q_tw = w*mu =1/4 * gamma (P/2)^4, => 1/vt2 * mu = 1/4 * gamma  * (P/2)^4
+    Q_gamma = wt2 * 64 * Q_mu / pow(P, 4); 
 
     double td_w = 0;
     // step scan the entire analysis period
@@ -3024,26 +3002,28 @@ double AdditionalCost(int k, int m) {
     return AddCost;
 }
 
-double Link_GenCost(int k, double* Volume) { return (Link[k].mode_AdditionalCost[1] + Link_Travel_Time(k, Volume)); }
+double Link_GenCost(int k, double* Volume) { 
+    return (Link[k].mode_AdditionalCost[1] + Link_Travel_Time(k, Volume)); 
+}
 
 double LinkCost_Integral(int k, double* Volume) {
     return (Link[k].mode_AdditionalCost[1] * Volume[k] + Link_Travel_Time_Integral(k, Volume));
 }
 
-double Link_GenCostDer(int k, double* Volume) { return (Link_Travel_Time_Der(k, Volume)); }
+double Link_GenCostDer(int k, double* Volume) { 
+    return (Link_Travel_Time_Der(k, Volume)); 
+}
 
 /* External functions */
 
 void ClearVolume(double* VolumeArray) {
-    int k;
-    for (k = 1; k <= number_of_links; k++) {
+    for (int k = 1; k <= number_of_links; k++) {
         VolumeArray[k] = 0.0;
     }
 }
 
 void VolumeDifference(double* Volume1, double* Volume2, double* Difference) { // SubVolume, MainVolume
-    int k;
-    for (k = 1; k <= number_of_links; k++) {
+    for (int k = 1; k <= number_of_links; k++) {
         Difference[k] = Volume1[k] - Volume2[k];
 
         for (int m = 1; m <= number_of_modes; m++) {
@@ -3057,8 +3037,7 @@ void VolumeDifference(double* Volume1, double* Volume2, double* Difference) { //
 }
 
 void UpdateVolume(double* MainVolume, double* SDVolume, double Lambda) {
-    int k;
-    for (k = 1; k <= number_of_links; k++) {
+    for (int k = 1; k <= number_of_links; k++) {
         MainVolume[k] += Lambda * SDVolume[k];
     }
 
@@ -3070,9 +3049,7 @@ void UpdateVolume(double* MainVolume, double* SDVolume, double Lambda) {
 }
 
 void UpdateLinkAdditionalCost(void) {
-    int k;
-
-    for (k = 1; k <= number_of_links; k++) {
+    for (int k = 1; k <= number_of_links; k++) {
         for (int m = 1; m <= number_of_modes; m++) {
             AdditionalCost(k, m);
         }
@@ -3080,10 +3057,9 @@ void UpdateLinkAdditionalCost(void) {
 }
 
 double UpdateLinkCost(double* MainVolume) {
-    int k;
     double system_wide_travel_time = 0;
 
-    for (k = 1; k <= number_of_links; k++) {
+    for (int k = 1; k <= number_of_links; k++) {
         Link[k].Travel_time = Link_Travel_Time(k, MainVolume);
 
         Link[k].GenCost = Link_GenCost(k, MainVolume);
@@ -3094,38 +3070,32 @@ double UpdateLinkCost(double* MainVolume) {
 }
 
 void UpdateLinkCostDer(double* MainVolume) {
-    int k;
-
-    for (k = 1; k <= number_of_links; k++) {
+    for (int k = 1; k <= number_of_links; k++) {
         Link[k].GenCostDer = Link_GenCostDer(k, MainVolume);
     }
 }
 
 void GetLinkTravelTimes(double* Volume, double* TravelTime) {
-    int k;
-
-    for (k = 1; k <= number_of_links; k++) {
+    for (int k = 1; k <= number_of_links; k++) {
         TravelTime[k] = Link_Travel_Time(k, Volume);
     }
 }
 
 double TotalLinkCost(double* Volume) {
-    int k;
     double Sum = 0;
 
-    for (k = 1; k <= number_of_links; k++) {
+    for (int k = 1; k <= number_of_links; k++) {
         Sum += Link[k].GenCost * Volume[k];
     }
     return Sum;
 }
 
-double OFscale = 1.0;
+constexpr double OFscale = 1.0;
 
 double OF_Links(double* MainVolume) {
-    int k;
     double Sum = 0;
 
-    for (k = 1; k <= number_of_links; k++) {
+    for (int k = 1; k <= number_of_links; k++) {
         Sum += LinkCost_Integral(k, MainVolume);
     }
 
@@ -3160,16 +3130,15 @@ double OF_LinksDirectionalDerivative(double* MainVolume, double* SDVolume, doubl
     // direction by Lambda.In the context of traffic assignment, it helps determine whether increasing or decreasing
     // Lambda will reduce the overall congestion and travel time.
 
-    int k;
     double* Volume;
     double LinkCostSum = 0;
 
     Volume = (double*)Alloc_1D(number_of_links, sizeof(double));
 
-    for (k = 1; k <= number_of_links; k++) {
+    for (int k = 1; k <= number_of_links; k++) {
         Volume[k] = MainVolume[k] + Lambda * SDVolume[k];
     }
-    for (k = 1; k <= number_of_links; k++) {
+    for (int k = 1; k <= number_of_links; k++) {
         LinkCostSum += Link_GenCost(k, Volume) * SDVolume[k];
 
         //   LinkCostSum += Link_Travel_Time_Integral(k, Volume) * SDVolume[k];
@@ -3180,16 +3149,14 @@ double OF_LinksDirectionalDerivative(double* MainVolume, double* SDVolume, doubl
 }
 
 double Sum_ODtable(double*** ODtable, double* total_o_table, int no_zones) {
-    int Orig, Dest;
-    double sum = 0.0;
-
-    for (Orig = 1; Orig <= no_zones; Orig++) {
+    for (int Orig = 1; Orig <= no_zones; Orig++) {
         total_o_table[Orig] = 0;
     }
 
+    double sum = 0.0;
     for (int m = 1; m <= number_of_modes; m++) {
-        for (Orig = 1; Orig <= no_zones; Orig++) {
-            for (Dest = 1; Dest <= no_zones; Dest++) {
+        for (int Orig = 1; Orig <= no_zones; Orig++) {
+            for (int Dest = 1; Dest <= no_zones; Dest++) {
                 total_o_table[Orig] += ODtable[m][Orig][Dest];
                 sum += ODtable[m][Orig][Dest];
             }
@@ -3453,13 +3420,12 @@ int g_ParserIntSequence(std::string str, std::vector<int>& vect) {
 }
 int read_vehicle_file(vector<shared_ptr<CAgent_Simu>>& agents) {
     CDTACSVParser parser_vehicle;
-    int count = 0;
-
     if (!parser_vehicle.OpenCSVFile("vehicle.csv", true)) {
         cerr << "Error: Cannot open vehicle.csv" << endl;
         return 0;
     }
 
+    int count = 0;
     while (parser_vehicle.ReadRecord()) {
         int agent_id;
         double departure_time; // in min
@@ -3611,7 +3577,7 @@ class LinkQueue {
 };
 
 class AgentLogger {
-  private:
+private:
     ofstream agent_file;
 
     string convertTimeToHHMMSS(double time_in_min) {
@@ -3653,7 +3619,7 @@ class AgentLogger {
         return ss.str();
     }
 
-  public:
+public:
     AgentLogger() {
         agent_file.open("trajectory.csv");
         // Write header
@@ -3689,6 +3655,7 @@ class AgentLogger {
         ss << ")\"";
         return ss.str();
     }
+
     void logAgent(const shared_ptr<CAgent_Simu>& agent, int l_demand_period_starting_hours) {
 
         double travel_time = (agent->link_departure_times[agent->current_link_seq_no] - agent->link_arrival_times[0]) *
@@ -3730,8 +3697,8 @@ class ParallelQueueSimulator {
     int num_nodes;
 
     void setupLink_queue() {
-        for (int l = 1; l <= num_links; l++) {
-            link_queues[l].setup(Link[l]);
+        for (int i = 1; i <= num_links; i++) {
+            link_queues[i].setup(Link[i]);
         }
     }
 
@@ -3803,11 +3770,11 @@ class ParallelQueueSimulator {
         // 7. Final bounds check
         return max(0.0, base_capacity); // Maximum 2 vehicles per lane per interval
     }
-    void estimateLinkCapacities(int t, int total_intervals) {
 
-        for (int l = 1; l <= num_links; l++) {
-            double outflow_capacity = calculateOutflowCapacity(l, t, total_intervals);
-            state.linkOutFlowCapacity[l][t] = outflow_capacity;
+    void estimateLinkCapacities(int t, int total_intervals) {
+        for (int i = 1; i <= num_links; i++) {
+            double outflow_capacity = calculateOutflowCapacity(i, t, total_intervals);
+            state.linkOutFlowCapacity[i][t] = outflow_capacity;
         }
     }
 
@@ -3845,8 +3812,8 @@ class ParallelQueueSimulator {
 
     void loadNewAgentsPerSimuInterval(int t) {
         int agents_loaded_this_step = 0;
-        for (int l = 1; l <= num_links; l++) {
-            LinkQueue& link = link_queues[l];
+        for (int i = 1; i <= num_links; i++) {
+            LinkQueue& link = link_queues[i];
             while (!link.loading_entrance_queue.empty()) {
                 int agent_seq_no = link.loading_entrance_queue.front();
                 auto agent = agents[agent_seq_no];
@@ -3924,17 +3891,18 @@ class ParallelQueueSimulator {
 
             if (node_transfers > 0) {
 #pragma omp critical
-                { fprintf(summary_log_file, "Time %d: Node %d processed %d transfers\n", t, i, node_transfers); }
+                { 
+                    fprintf(summary_log_file, "Time %d: Node %d processed %d transfers\n", t, i, node_transfers); 
+                }
             }
         }
     }
 
     void processLinkTransfer(int t) {
-
         int t_in_min = t * number_of_seconds_per_interval / 60;
 #pragma omp parallel for
-        for (int l = 1; l <= num_links; l++) {
-            auto& link = link_queues[l];
+        for (int i = 1; i <= num_links; i++) {
+            auto& link = link_queues[i];
 
             while (!link.entrance_queue.empty()) {
                 int agent_seq_no = link.entrance_queue.front();
@@ -3947,7 +3915,7 @@ class ParallelQueueSimulator {
 
                 link.entrance_queue.pop_front();
                 link.exit_queue.push_back(agent_seq_no);
-                // state.linkCumulativeArrival[l][t_in_min]++;
+                // state.linkCumulativeArrival[i][t_in_min]++;
             }
         }
     }
@@ -4019,17 +3987,10 @@ class ParallelQueueSimulator {
                 debug_file << "0,error," << agent->agent_uid << ",0,0,empty_path\n";
             }
         }
-
-        //// Log link loading distribution
-        // fprintf(summary_log_file, "\nInitial link loading distribution:\n");
-        // for (const auto& [link_id, count] : link_loading_counts) {
-        //	fprintf(summary_log_file, "Link %d: %d agents\n", link_id, count);
-        //	debug_file << "0,link_summary," << link_id << ",0," << count
-        //		<< ",initial_loading\n";
     }
 };
-int SimulationAPI() {
 
+int SimulationAPI() {
     fopen_s(&summary_log_file, "summary_log_file.txt", "w");
 
     double *MainVolume, *SubVolume, *SDVolume, Lambda;
@@ -4049,10 +4010,6 @@ int SimulationAPI() {
 
     double system_wide_travel_time = 0;
     double system_least_travel_time = 0;
-
-    // fprintf(logfile,
-    //     "iteration_no,link_id,internal_from_node_id,internal_to_node_id,volume,capacity,voc,"
-    //     "fftt,travel_time,delay\n");
 
     Init(number_of_modes, no_zones);
 
@@ -4176,8 +4133,7 @@ struct GridCell {
 // and processes each cell to compute a matching cost.
 // ---------------------------------------------------------
 class MatchingGrid {
-
-  public:
+public:
     int m_FirstThruNode;
 
     MatchingGrid(double left, double right, double bottom, double top, double gridRes = DEFAULT_GRID_RESOLUTION,
@@ -4484,7 +4440,6 @@ void determineOriginDestinationNodes(const std::vector<GPSPoint>& trace, const M
 // Example main() demonstrating advanced grid-based matching using MMLink
 // -------------------------
 int mapmatchingAPI() {
-
     fopen_s(&summary_log_file, "summary_log_file.txt", "w");
     double *MainVolume, *SubVolume, *SDVolume, Lambda;
     int*** MDMinPathPredLink;
@@ -4597,10 +4552,8 @@ int mapmatchingAPI() {
     }
 
     InitializeLinkIndices(number_of_modes, no_zones, max_route_size);
-    ;
 
     for (const auto& agentPair : gpsTraces) {
-
         mGrid.cleanGPSPoint();
         const std::string& agentId = agentPair.first;
 
