@@ -6,7 +6,7 @@
 // the modified label correcting (MLC) algorithm in C. For more details, see mincostroutes.cpp. 
 // The enhanced C++ counterpart has served as the path engine for Path4GMNS and TransOMS.
 // https://github.com/jdlph/TAP101
-
+#define M_PI 3.14159265358979323846
 #define FLOAT_ACCURACY 1.0E-15
 #define NO_COSTPARAMETERS 4
 #define IVTT 0
@@ -79,7 +79,7 @@ struct link_record {
 	std::string allowed_uses;
 	int mode_allowed_use[MAX_MODE_TYPES];
 	double mode_MainVolume[MAX_MODE_TYPES];
-	double mode_Base_Volume[MAX_MODE_TYPES];
+	double mode_Base_demand_volume[MAX_MODE_TYPES];
 	double mode_SubVolume[MAX_MODE_TYPES];
 	double mode_SDVolume[MAX_MODE_TYPES];
 
@@ -94,8 +94,10 @@ struct link_record {
 	double GenCost;
 	double GenCostDer;
 	double Ref_volume;
-	double Base_volume;
+	double Base_demand_volume;
+	double background_volume; 
 	double Obs_volume;
+	double reassignment_volume;
 	std::string geometry;
 
 	int timing_arc_flag, cycle_length, start_green_time, end_green_time;
@@ -118,7 +120,7 @@ struct link_record {
 		BPR_TT = 0;
 		QVDF_TT = 0;
 		Ref_volume = 0;
-		Base_volume = 0;
+		Base_demand_volume = 0;
 		Obs_volume = -1;
 		Lane_SaturationFlowRate = 1800; 
 
@@ -126,6 +128,7 @@ struct link_record {
 		cycle_length = 60;
 		start_green_time = 0;
 		end_green_time = 30; 
+		background_volume = 0; 
 
 	}
 	void setup(int num_of_modes)
@@ -144,11 +147,11 @@ struct link_record {
 		BPR_TT = 0;
 		QVDF_TT = 0;
 		Ref_volume = 0;
-		Base_volume = 0;
+		Base_demand_volume = 0;
 		Obs_volume = -1;
 		for (int m = 1; m <= num_of_modes; m++)
 		{
-			mode_Base_Volume[m] = 0;
+			mode_Base_demand_volume[m] = 0;
 		}
 	}
 };
@@ -222,6 +225,7 @@ int	demand_period_ending_hours = 8;
 int g_tap_log_file = 0;
 int g_base_demand_mode = 1;
 int g_ODME_mode = 0;
+int g_ODME_target_od = -1;
 double g_ODME_obs_VMT = -1;
 double g_System_VMT = 0;
 
@@ -666,7 +670,7 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
 	{
 		for (int k = 1; k <= number_of_links; k++)
 		{
-			Volume[k] = Link[k].Base_volume;
+			Volume[k] = Link[k].Base_demand_volume;
 
 			for (int p = 0; p < g_number_of_processors; p++)
 			{
@@ -675,7 +679,7 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
 
 			for (int m = 1; m <= number_of_modes; m++)
 			{
-				Link[k].mode_MainVolume[m] = Link[k].mode_Base_Volume[m];
+				Link[k].mode_MainVolume[m] = Link[k].mode_Base_demand_volume[m];
 
 				for (int p = 0; p < g_number_of_processors; p++)
 				{
@@ -855,19 +859,23 @@ void performODME(std::vector<double> theta, double* MainVolume, struct link_reco
         // --- Log simple deviation measures ---
         {
             // OD deviation: compute sum of absolute differences (and average)
+
             double totalODDev = 0.0;
             int odCount = 0;
-            for (int m = 1; m <= numModes; ++m) {
-                for (int Orig = 1; Orig <= numZones; ++Orig) {
-                    for (int Dest = 1; Dest <= numZones; ++Dest) {
-                        if (Orig == Dest)
-                            continue;
-                        double diff = MDODflow[m][Orig][Dest] - targetMDODflow[m][Orig][Dest];
-                        totalODDev += std::fabs(diff);
-                        odCount++;
-                    }
-                }
-            }
+			if (g_ODME_target_od >= 1)
+			{
+				for (int m = 1; m <= numModes; ++m) {
+					for (int Orig = 1; Orig <= numZones; ++Orig) {
+						for (int Dest = 1; Dest <= numZones; ++Dest) {
+							if (Orig == Dest)
+								continue;
+							double diff = MDODflow[m][Orig][Dest] - targetMDODflow[m][Orig][Dest];
+							totalODDev += std::fabs(diff);
+							odCount++;
+						}
+					}
+				}
+			}
             double avgODDev = (odCount > 0 ? totalODDev / odCount : 0.0);
 
             // Link deviation: compute link flows and compare with observed volume
@@ -909,6 +917,10 @@ void performODME(std::vector<double> theta, double* MainVolume, struct link_reco
                 VMT += linkFlows[l] * Link[l].length;
             }
             double vmtDev = (VMT_target > 0 ? (VMT - VMT_target) : 0.0);
+
+			cout << "[Deviation Log] OD avg deviation = " << avgODDev
+				<< ", Link avg deviation = " << avgLinkDev
+				<< ", VMT deviation = " << vmtDev << "\n";
 
             logFile << "[Deviation Log] OD avg deviation = " << avgODDev
                     << ", Link avg deviation = " << avgLinkDev
@@ -955,12 +967,10 @@ void performODME(std::vector<double> theta, double* MainVolume, struct link_reco
                         int count_usage = entry.second;
                         double sensitivity = static_cast<double>(count_usage) / routeCount;
                         if (Link[link_id].Obs_volume > 1) {
-                            // Placeholder term if you wish to refine this component.
-                            grad_link += 2.0 * w_link * (0.0 + 0.0) * sensitivity;
+                            grad_link += 2.0 * w_link * sensitivity;
                         }
                         if (VMT_target > 1) {
-                            // Placeholder term.
-                            grad_vmt += 2.0 * w_vmt * (0.0 + 0.0) * (Link[link_id].length * sensitivity);
+                            grad_vmt += 2.0 * w_vmt * (Link[link_id].length * sensitivity);
                         }
                     }
                     double grad_od = 2.0 * w_od * (od_flow - targetMDODflow[m][Orig][Dest]);
@@ -1390,6 +1400,7 @@ struct RouteData {
 	int unique_route_id;             // A sequential unique id for output
 	std::string nodeIDsStr;          // Node IDs (string)
 	std::string linkIDsStr;          // Link IDs (string)
+	std::string linkLengthStr;          // Link Length (string)
 	double totalDistance;
 	double totalFreeFlowTravelTime;
 	double totalTravelTime;
@@ -1405,7 +1416,6 @@ void OutputRouteDetails(const std::string& filename, std::vector<double> theta)
 		return; 
 	// Write the CSV header in lowercase
 	outputFile << "mode,route_id,o_zone_id,d_zone_id,unique_route_id,prob,node_ids,link_ids,distance_mile,total_distance_km,total_free_flow_travel_time,total_travel_time,route_key,volume,\n";
-
 
 
 	for (int m = 1; m < linkIndices.size(); ++m)
@@ -1429,7 +1439,8 @@ void OutputRouteDetails(const std::string& filename, std::vector<double> theta)
 						double totalTravelTime = 0.0;
 						std::string nodeIDsStr;
 						std::string linkIDsStr;
-
+						std::string linkLengthStr;
+						
 						int nodeSum = 0;  // Sum of node IDs (for uniqueness key)
 						int linkSum = 0;  // Sum of link IDs (for uniqueness key)
 
@@ -1445,6 +1456,8 @@ void OutputRouteDetails(const std::string& filename, std::vector<double> theta)
 
 							// Append the link index (as a proxy for link ID) and accumulate.
 							linkIDsStr += std::to_string(k) + ";";
+							//double length = Link[k].length; 
+							//linkLengthStr += std::to_string(length) + ";";
 							linkSum += k;
 
 							// Sum the distance and travel times.
@@ -1474,6 +1487,7 @@ void OutputRouteDetails(const std::string& filename, std::vector<double> theta)
 							rd.unique_route_id = unique_route_id;  // Unique id for output.
 							rd.nodeIDsStr = nodeIDsStr;
 							rd.linkIDsStr = linkIDsStr;
+							//rd.linkLengthStr = linkLengthStr; 
 							rd.totalDistance = totalDistance;
 							rd.totalFreeFlowTravelTime = totalFreeFlowTravelTime;
 							rd.totalTravelTime = totalTravelTime;
@@ -1515,6 +1529,9 @@ void OutputRouteDetails(const std::string& filename, std::vector<double> theta)
 
 						route_volume = od_volume * rd.accumulatedTheta;
 					} 
+
+					if(od_volume >=1.0)
+					{
 					// (Optional) Remove trailing semicolon from linkIDsStr if needed.
 					std::string cleanedLinkIDsStr = rd.linkIDsStr;
 					if (!cleanedLinkIDsStr.empty() && cleanedLinkIDsStr.back() == ';')
@@ -1528,12 +1545,24 @@ void OutputRouteDetails(const std::string& filename, std::vector<double> theta)
 						<< rd.accumulatedTheta << ","
 						<< rd.nodeIDsStr << ","
 						<< cleanedLinkIDsStr << ","
+						//<< rd.linkLengthStr << ","
 						<< rd.totalDistance << ","
 						<< rd.totalDistance * 1.609 << ","
 						<< rd.totalFreeFlowTravelTime << ","
 						<< rd.totalTravelTime << ","
 						<< rd.routeKey << ","
 						<< route_volume << "\n";
+					}
+					else
+					{
+
+						// Process the route in reverse order (as in your code).
+						for (int i = linkIndices[m][Orig][Dest][rd.unique_route_id].size() - 1; i >= 0; --i)
+						{
+							int k = linkIndices[m][Orig][Dest][rd.unique_route_id][i];
+							Link[k].background_volume += route_volume;
+						}
+					}
 				}
 
 			}
@@ -1547,6 +1576,8 @@ void OutputRouteDetails(const std::string& filename, std::vector<double> theta)
 	std::cout << "Output written to " << filename << std::endl;
 
 }
+
+
 
 
 constexpr auto LCG_a = 17364;
@@ -1814,13 +1845,24 @@ void OutputVehicleDetails(const std::string& filename, std::vector<double> theta
 void OutputODPerformance(const std::string& filename)
 {
 	std::ofstream outputFile(filename);  // Open the file for writing
+	std::ofstream googleMapsFile("google_maps_od_distance.csv");
+
+	if (!googleMapsFile.is_open())
+	{
+		std::cerr << "Error: Could not open Google Maps links file." << std::endl;
+		return;
+	}
+
+	googleMapsFile << "mode,o_zone_id,d_zone_id,volume,total_distance_mile,total_distance_km,straight_line_distance_mile,straight_line_distance_km,distance_ratio,total_free_flow_travel_time,total_congestion_travel_time,google_maps_http_link\n";
 
 	// Write the CSV header in lowercase
-	outputFile << "mode,o_zone_id,d_zone_id,o_x_coord,o_y_coord,d_x_coord,d_y_coord,total_distance_mile,total_distance_km,total_free_flow_travel_time,total_congestion_travel_time,volume,\n";
+	outputFile << "mode,o_zone_id,d_zone_id,o_x_coord,o_y_coord,d_x_coord,d_y_coord,total_distance_mile,total_distance_km,straight_line_distance_mile,straight_line_distance_km,distance_ratio,total_free_flow_travel_time,total_congestion_travel_time,volume,\n";
 	double grand_totalDistance = 0.0;
 	double grand_totalFreeFlowTravelTime = 0.0;
 	double grand_totalTravelTime = 0.0;
 	double grand_total_count = 0;
+	double grand_total_straight_line_distance = 0.0;
+	double grand_total_distance_ratio = 0.0;
 
 
 	for (int m = 1; m < linkIndices.size(); ++m)
@@ -1885,7 +1927,7 @@ void OutputODPerformance(const std::string& filename)
 							if (!linkIDsStr.empty())
 								linkIDsStr.pop_back();
 
-							float volume = MDODflow[m][Orig][Dest]; 
+							float volume = MDODflow[m][Orig][Dest];
 
 
 							grand_totalDistance += totalDistance * volume;
@@ -1902,12 +1944,68 @@ void OutputODPerformance(const std::string& filename)
 							d_x_coord = g_node_vector[internal_d_node_id].x;
 							d_y_coord = g_node_vector[internal_d_node_id].y;
 
+							// Calculate straight line distance using Haversine formula for WGS84 coordinates
+							// o_x_coord and d_x_coord are longitudes
+							// o_y_coord and d_y_coord are latitudes
+
+							// Convert latitude and longitude from degrees to radians
+							double lat1_rad = o_y_coord * M_PI / 180.0;
+							double lon1_rad = o_x_coord * M_PI / 180.0;
+							double lat2_rad = d_y_coord * M_PI / 180.0;
+							double lon2_rad = d_x_coord * M_PI / 180.0;
+
+							// Haversine formula
+							double dlon = lon2_rad - lon1_rad;
+							double dlat = lat2_rad - lat1_rad;
+							double a = pow(sin(dlat / 2), 2) + cos(lat1_rad) * cos(lat2_rad) * pow(sin(dlon / 2), 2);
+							double c = 2 * atan2(sqrt(a), sqrt(1 - a));
+
+							// Earth's radius in miles
+							double earth_radius_miles = 3958.8; // miles
+
+							// Calculate the distance
+							double straight_line_distance_mile = earth_radius_miles * c;
+							double straight_line_distance_km = straight_line_distance_mile * 1.609;
+
+							// Calculate the ratio of assigned route distance to straight line distance
+							double distance_ratio = 1.0;  // Default value
+							if (straight_line_distance_mile > 0.001)  // Avoid division by very small numbers
+							{
+								distance_ratio = totalDistance / straight_line_distance_mile;
+							}
+
+							grand_total_straight_line_distance += straight_line_distance_mile * volume;
+							grand_total_distance_ratio += distance_ratio * volume;
+
 							// Write the data for this OD pair and route to the CSV file
 							outputFile << g_mode_type_vector[m].mode_type.c_str() << "," << Orig << "," << Dest << ","
-								<< o_x_coord  <<"," << o_y_coord  <<","
+								<< o_x_coord << "," << o_y_coord << ","
 								<< d_x_coord << "," << d_y_coord << ","
-								<< totalDistance << "," << totalDistance*1.609 << "," << totalFreeFlowTravelTime << ","
+								<< totalDistance << "," << totalDistance * 1.609 << ","
+								<< straight_line_distance_mile << "," << straight_line_distance_km << "," << distance_ratio << ","
+								<< totalFreeFlowTravelTime << ","
 								<< totalTravelTime << "," << volume << "\n";
+
+							// If volume > 10, create Google Maps link
+							if (volume > 10.0)
+							{
+								// Format Google Maps URL with coordinates
+								// Format: https://www.google.com/maps/dir/origin_lat,origin_lng/destination_lat,destination_lng/
+								std::string googleMapsLink = "https://www.google.com/maps/dir/" +
+									std::to_string(o_y_coord) + "," + std::to_string(o_x_coord) + "/" +
+									std::to_string(d_y_coord) + "," + std::to_string(d_x_coord) + "/";
+
+								// Write to Google Maps links file
+								googleMapsFile << g_mode_type_vector[m].mode_type.c_str() << ","
+									<< Orig << ","
+									<< Dest << ","
+									<< volume << ","
+									<< totalDistance << "," << totalDistance * 1.609 << ","
+									<< straight_line_distance_mile << "," << straight_line_distance_km << "," << distance_ratio << ","
+									<< totalFreeFlowTravelTime << ","
+									<< totalTravelTime << ","
+									<< "\"" << googleMapsLink << "\"\n";
+							}
 
 							unique_route_id++;
 						}
@@ -1925,8 +2023,14 @@ void OutputODPerformance(const std::string& filename)
 	if (grand_total_count < 0.001)
 		grand_total_count = 0.001;
 
+	double avg_distance_ratio = grand_total_distance_ratio / grand_total_count;
+
 	std::cout << "OD performance summary: avg distance = "
 		<< grand_totalDistance / grand_total_count << " miles, "
+		<< ", avg straight-line distance = "
+		<< grand_total_straight_line_distance / grand_total_count << " miles, "
+		<< ", avg distance ratio = "
+		<< avg_distance_ratio << " "
 		<< ", avg free-flow travel time = "
 		<< grand_totalFreeFlowTravelTime / grand_total_count << " min, "
 		<< ", avg total travel time = "
@@ -1937,6 +2041,9 @@ void OutputODPerformance(const std::string& filename)
 	// Close the file after writing
 	outputFile.close();
 	std::cout << "Output written to " << filename << std::endl;
+
+	googleMapsFile.close();
+	std::cout << "Google Maps links for high-volume OD pairs (volume > 10) written to google_maps_links.csv" << std::endl;
 }
 
 
@@ -2070,7 +2177,7 @@ void read_settings_file()
 			// field headers.
 		{
 			g_number_of_processors = 4;
-			parser_settings.GetValueByFieldName("metric_system", g_metric_system_flag);
+
 			parser_settings.GetValueByFieldName("number_of_iterations", TotalAssignIterations);
 			parser_settings.GetValueByFieldName("number_of_processors", g_number_of_processors);
 			parser_settings.GetValueByFieldName("demand_period_starting_hours", demand_period_starting_hours);
@@ -2274,14 +2381,14 @@ int AssignmentAPI()
 
 	for (int k = 1; k <= number_of_links; k++)
 	{
-		MainVolume[k] = Link[k].Base_volume;  // assign the base volume  to main volume 
+		MainVolume[k] = Link[k].Base_demand_volume;  // assign the base volume  to main volume 
 	}
 
 	system_wide_travel_time = UpdateLinkCost(MainVolume);  // set up the cost first using FFTT
 
 	fprintf(link_performance_file,
-		"iteration_no,link_id,from_node_id,to_node_id,volume,ref_volume,base_volume,obs_volume,"
-		"capacity,D,doc,fftt,travel_time,VDF_alpha,VDF_beta,VDF_plf,speed_mph,speed_kmph,VMT,VHT,PMT,PHT,VHT_QVDF,PHT_QVDF,geometry,");
+		"iteration_no,link_id,from_node_id,to_node_id,volume,ref_volume,base_demand_volume,obs_volume,background_volume,"
+		"capacity,D,doc,vdf_fftt,travel_time,vdf_alpha,vdf_beta,vdf_plf,speed_mph,speed_kmph,VMT,VHT,PMT,PHT,VHT_QVDF,PHT_QVDF,geometry,");
 
 	fprintf(logfile, "iteration_no,link_id,from_node_id,to_node_id,volume,ref_volume,obs_volume,capacity,doc,fftt,travel_time,delay,");
 
@@ -2334,9 +2441,9 @@ int AssignmentAPI()
 	{
 		for (int k = 1; k <= number_of_links; k++)
 		{
-			fprintf(logfile, "%d,%d,%d,%d,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,",
+			fprintf(logfile, "%d,%d,%d,%d,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,",
 				iteration_no, k, Link[k].external_from_node_id, Link[k].external_to_node_id,
-				MainVolume[k], Link[k].Ref_volume, Link[k].Obs_volume, Link[k].Link_Capacity,
+				MainVolume[k], Link[k].Ref_volume, Link[k].Obs_volume, Link[k].background_volume, Link[k].Link_Capacity,
 				MainVolume[k] / fmax(0.01, Link[k].Link_Capacity), Link[k].FreeTravelTime,
 				Link[k].Travel_time, Link[k].Travel_time - Link[k].FreeTravelTime);
 
@@ -2491,6 +2598,8 @@ int AssignmentAPI()
 			OutputVehicleDetails("vehicle.csv", m_theta);
 	}
 
+	// output link_performance.csv
+
 	for (int k = 1; k <= number_of_links; k++)
 	{
 
@@ -2532,7 +2641,7 @@ int AssignmentAPI()
 
 		fprintf(link_performance_file, "%d,%d,%d,%d,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,",
 			iteration_no, Link[k].link_id, Link[k].external_from_node_id, Link[k].external_to_node_id,
-			MainVolume[k], Link[k].Ref_volume, Link[k].Base_volume, Link[k].Obs_volume, Link[k].Link_Capacity, IncomingDemand, DOC, Link[k].FreeTravelTime,
+			MainVolume[k], Link[k].Ref_volume, Link[k].Base_demand_volume, Link[k].Obs_volume, Link[k].Link_Capacity, IncomingDemand, DOC, Link[k].FreeTravelTime,
 			Link[k].Travel_time, Link[k].VDF_Alpha, Link[k].VDF_Beta, Link[k].VDF_plf, Link[k].length / fmax(Link[k].Travel_time / 60.0, 0.001), Link[k].length / fmax(Link[k].Travel_time / 60.0, 0.001) * 1.609, Link[k].Travel_time - Link[k].FreeTravelTime);
 
 		fprintf(link_performance_file, "%2lf,%2lf,%2lf,%2lf,%2lf,%2lf,", VMT, VHT, PMT, PHT, VHT_QVDF, PHT_QVDF);
@@ -2586,11 +2695,11 @@ static void Init(int int_number_of_modes, int input_no_zones)
 		for (int k = 1; k <= number_of_links; k++)
 		{
 
-			Link[k].Base_volume = 0;
+			Link[k].Base_demand_volume = 0;
 
 			for (int m = 1; m <= int_number_of_modes; m++)
 			{
-				Link[k].mode_Base_Volume[m] = 0;
+				Link[k].mode_Base_demand_volume[m] = 0;
 			}
 		}
 	}
@@ -2654,6 +2763,8 @@ void ReadLinks()
 			if (g_metric_system_flag == 1)
 				free_speed = free_speed / 1.609;
 
+			parser_link.GetValueByFieldName("vdf_free_speed_mph", free_speed);
+
 			if (lanes <= 0 || capacity < 0.0001 || free_speed < 0.0001) {
 				std::cerr << "Error: Invalid link attributes detected. "
 					<< "lanes = " << lanes
@@ -2714,10 +2825,8 @@ void ReadLinks()
 			g_node_vector[Link[k].internal_to_node_id].m_incoming_link_seq_no_vector.push_back(k);
 			g_node_vector[Link[k].internal_from_node_id].m_outgoing_link_seq_no_vector.push_back(k);
 
-			parser_link.GetValueByFieldName("length", Link[k].length);
+			parser_link.GetValueByFieldName("vdf_length_mi", Link[k].length);
 
-			if (g_metric_system_flag == 1)
-				Link[k].length = Link[k].length / 1609;
 
 			parser_link.GetValueByFieldName("ref_volume", Link[k].Ref_volume);
 
@@ -2729,16 +2838,16 @@ void ReadLinks()
 			if (g_base_demand_mode == 1)
 			{
 
-				parser_link.GetValueByFieldName("base_volume", Link[k].Base_volume);
-				total_base_link_volume += Link[k].Base_volume;
+				parser_link.GetValueByFieldName("base_demand_volume", Link[k].Base_demand_volume);
+				total_base_link_volume += Link[k].Base_demand_volume;
 
 				if (number_of_modes == 1)  // single mode 
-					Link[k].mode_Base_Volume[1] = Link[k].Base_volume;
+					Link[k].mode_Base_demand_volume[1] = Link[k].Base_demand_volume;
 
 				for (int m = 1; m <= number_of_modes; m++)
 				{
 					std::string field_name = "base_vol_" + std::string(g_mode_type_vector[m].mode_type);
-					parser_link.GetValueByFieldName(field_name.c_str(), Link[k].mode_Base_Volume[m]);
+					parser_link.GetValueByFieldName(field_name.c_str(), Link[k].mode_Base_demand_volume[m]);
 
 				}
 			}
@@ -2796,9 +2905,11 @@ void ReadLinks()
 
 			Link[k].FreeTravelTime = Link[k].length / free_speed * 60.0;
 
-			parser_link.GetValueByFieldName("VDF_alpha", Link[k].VDF_Alpha);
-			parser_link.GetValueByFieldName("VDF_beta", Link[k].VDF_Beta);
-			parser_link.GetValueByFieldName("VDF_plf", Link[k].VDF_plf);
+			parser_link.GetValueByFieldName("vdf_fftt", Link[k].FreeTravelTime,true);
+
+			parser_link.GetValueByFieldName("vdf_alpha", Link[k].VDF_Alpha, true);
+			parser_link.GetValueByFieldName("vdf_beta", Link[k].VDF_Beta, true);
+			parser_link.GetValueByFieldName("vdf_plf", Link[k].VDF_plf, true);
 
 
 			for (int m = 1; m <= number_of_modes; m++)
@@ -2818,10 +2929,10 @@ void ReadLinks()
 				Link[k].BoverC = 0;
 
 
-			parser_link.GetValueByFieldName("VDF_cp", Link[k].Q_cp);
-			parser_link.GetValueByFieldName("VDF_cd", Link[k].Q_cd);
-			parser_link.GetValueByFieldName("VDF_n", Link[k].Q_n);
-			parser_link.GetValueByFieldName("VDF_s", Link[k].Q_s);
+			parser_link.GetValueByFieldName("vdf_cp", Link[k].Q_cp);
+			parser_link.GetValueByFieldName("vdf_cd", Link[k].Q_cd);
+			parser_link.GetValueByFieldName("vdf_n", Link[k].Q_n);
+			parser_link.GetValueByFieldName("vdf_s", Link[k].Q_s);
 
 			Link[k].free_speed = free_speed;
 			Link[k].Cutoff_Speed = free_speed * 0.75;  // use 0.75 as default ratio, when free_speed = 70 mph, Cutoff_Speed = 52.8 mph in I-10 data set
@@ -3137,9 +3248,13 @@ int Read_ODtable(double*** ODtable, double*** DiffODtable, double*** target_ODta
 
 			if (file == NULL)
 			{
+
+				g_ODME_target_od = -1; 
 				// by default, we can skip this requirement, but if we load baseline link volume we should have base OD demand for consistency 
 				break;
 			}
+
+			g_ODME_target_od = 1;
 
 			int o_zone_id, d_zone_id;
 			double volume;
@@ -5140,12 +5255,11 @@ int mapmatchingAPI() {
 
 int main()
 {
-	mapmatchingAPI();
+	//mapmatchingAPI();
 	//
-	//AssignmentAPI();
+	AssignmentAPI();
 	//SimulationAPI();
 }
-
 
 void DTALiteAPI() {
 	main();
