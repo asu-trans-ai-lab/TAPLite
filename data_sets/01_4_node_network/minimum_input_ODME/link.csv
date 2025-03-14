@@ -1,6 +1,5 @@
-from_node_id,to_node_id,length,lanes,free_speed,capacity,link_type,VDF_alpha,VDF_beta,allowed_uses,obs_volume
-1,4,15,1,60,3000,2,0.15,4,,1552.1474
-4,2,15,1,60,3000,2,0.15,4,,
-1,3,10,1,60,4000,1,0.15,4,,
-3,2,10,1,60,4000,1,0.15,4,,
-1,2,40,1,60,10000,1,0.15,4,,2000
+link_id,from_node_id,to_node_id,length,vdf_length_in_mi,vdf_fftt,lanes,free_speed,capacity,link_type,vdf_alpha,vdf_beta,allowed_uses,obs_volume
+1,1,3,16090,10,10,1,60,4000,1,0.15,4,,5468.75
+2,1,4,24135,15,15,1,60,3000,2,0.15,4,,1531.25
+3,3,2,16090,10,10,1,60,4000,1,0.15,4,,
+4,4,2,24135,15,15,1,60,3000,2,0.15,4,,

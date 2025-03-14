@@ -1,0 +1,2 @@
+route_key,mode,o_zone_id,d_zone_id,o_x_coord,o_y_coord,d_x_coord,d_y_coord,total_distance_mile,total_distance_km,straight_line_distance_mile,straight_line_distance_km,distance_ratio,total_free_flow_travel_time,total_congestion_travel_time,volume,WKT_geometry
+1_2_auto,auto,1,2,0,-0.1,40.3,0.1,20,32.18,2784.52,4480.3,0.00718255,20,35.1283,7069.64,"LINESTRING(0.000000 -0.100000,19.800000 14.800000,40.300000 0.100000)"
