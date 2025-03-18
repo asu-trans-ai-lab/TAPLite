@@ -1,0 +1,14 @@
+no_nodes= 24, no_zones = 24, FirstThruNode (seq No) = 1, number_of_links = 76
+read demand file demand.csv
+ mode type = auto, total_volume = 360600.000000
+iter No = 0, sys. TT =  3441986.555223, least TT =  3176000.000000, gap = 8.374892 %
+iter No = 1, Lambda = 0.312500, g_System_VMT = 3176000.000000, sys. TT =  3327238.581892, least TT =  3382016.515681, gap = -1.619683 % 
+iter No = 2, Lambda = 1.000000, g_System_VMT = 3193500.000000, sys. TT =  3313250.866466, least TT =  3315967.813490, gap = -0.081935 % 
+iter No = 3, Lambda = 0.406250, g_System_VMT = 3184400.000000, sys. TT =  3309032.975405, least TT =  3312639.576032, gap = -0.108874 % 
+iter No = 4, Lambda = 0.468750, g_System_VMT = 3185293.750000, sys. TT =  3310547.325244, least TT =  3308897.382739, gap = 0.049864 % 
+iter No = 5, Lambda = 0.625000, g_System_VMT = 3184874.804688, sys. TT =  3311605.839252, least TT =  3310465.336942, gap = 0.034451 % 
+iter No = 6, Lambda = 0.187500, g_System_VMT = 3184578.051758, sys. TT =  3311413.200361, least TT =  3311553.775961, gap = -0.004245 % 
+iter No = 7, Lambda = 0.406250, g_System_VMT = 3184619.667053, sys. TT =  3311101.609956, least TT =  3311395.599960, gap = -0.008878 % 
+iter No = 8, Lambda = 0.093750, g_System_VMT = 3184692.927313, sys. TT =  3311053.837223, least TT =  3311074.731988, gap = -0.000631 % 
+iter No = 9, Lambda = 0.062500, g_System_VMT = 3184702.965377, sys. TT =  3311078.559610, least TT =  3311047.662989, gap = 0.000933 % 
+CPU running time: 0 hours 0 minutes 0 seconds 15 ms
