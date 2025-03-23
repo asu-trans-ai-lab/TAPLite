@@ -40,4 +40,4 @@ iter No = 36, Lambda = 0.031250, g_System_VMT = 3450547.002149, sys. TT =  75148
 iter No = 37, Lambda = 0.031250, g_System_VMT = 3448645.533332, sys. TT =  7515406.057953, least TT =  7468406.041322, gap = 0.629318 % 
 iter No = 38, Lambda = 0.031250, g_System_VMT = 3447231.610415, sys. TT =  7510745.029885, least TT =  7466447.924918, gap = 0.593282 % 
 iter No = 39, Lambda = 0.031250, g_System_VMT = 3447202.497590, sys. TT =  7510054.736068, least TT =  7467565.805832, gap = 0.568980 % 
-CPU running time: 0 hours 0 minutes 0 seconds 32 ms
+CPU running time: 0 hours 0 minutes 0 seconds 35 ms

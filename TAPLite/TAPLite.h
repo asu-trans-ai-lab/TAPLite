@@ -21,10 +21,11 @@ extern "C" PATH_ENGINE_API void DTALiteAPI();
 static int MinLineSearchIterations = 5;
 static int ActualIterations = 0;
 static double LastLambda = 1.0;
+int g_accessibility_only_mode = 0;
 
 std::map<int, int> g_map_external_node_id_2_node_seq_no;
 std::map<int, int> g_map_node_seq_no_2_external_node_id;
-
+std::map<int, int> g_map_internal_zone_no_2_node_seq_no;
 class CDTACSVParser {
 public:
     char Delimiter;
