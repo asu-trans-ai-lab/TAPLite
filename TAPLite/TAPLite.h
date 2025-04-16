@@ -7,7 +7,9 @@
 #define PATH_ENGINE_API
 #endif
 
-extern "C" PATH_ENGINE_API void DTALiteAPI();
+extern "C" PATH_ENGINE_API void DTA_AssignmentAPI();
+
+extern "C" PATH_ENGINE_API void DTA_SimulationAPI();
 
 #define BUFFERSIZE 1000
 #define MAX_NO_BISECTITERATION 5 /* Avoids infinite loops */
@@ -17,6 +19,8 @@ extern "C" PATH_ENGINE_API void DTALiteAPI();
 #include <string>
 #include <sstream>
 #include <vector>
+#include <algorithm>
+#include <cctype>
 
 static int MinLineSearchIterations = 5;
 static int ActualIterations = 0;

@@ -24,6 +24,11 @@
 
 #include "TAPLite.h"
 
+
+#define _CRTDBG_MAP_ALLOC
+#include <crtdbg.h>
+#include <cstdlib>
+
 #include <cstdio>
 #include <cmath>
 #include <memory>
@@ -289,7 +294,7 @@ static void CloseODflow(void);
 /* End of local declarations. */
 
 FILE* logfile;
-int shortest_path_log_flag = 0;
+int route_output_flag = 0;
 int vehicle_log_flag = 0;
 int baseODDemand_loaded_flag = 0;
 int baselinkvolume_loaded_flag = 0;
@@ -337,7 +342,7 @@ public:
 
 vector<Node> g_node_vector;
 
-int Minpath(int mode, int Orig, int* PredLink, double* CostTo)
+int Minpath(int mode, int Orig, int* PredLink, double* CostTo)  // CostTo is based on origin 
 {
 	int node, now, NewNode, k, Return2Q_Count = 0;
 	double NewCost;
@@ -444,7 +449,7 @@ double FindMinCostRoutes(int*** MinPathPredLink)
 {
 	double** CostTo;
 
-	CostTo = (double**)Alloc_2D(no_zones, no_nodes, sizeof(double));
+	CostTo = (double**)Alloc_2D(no_zones, no_nodes, sizeof(double));  // cost to is based on the zone number (original node numbers) and # of nodes (node sequence no.) 
 	StatusMessage("Minpath", "Starting the minpath calculations.");
 	double* system_least_travel_time_org_zone = (double*)Alloc_1D(no_zones, sizeof(double));
 
@@ -477,12 +482,10 @@ double FindMinCostRoutes(int*** MinPathPredLink)
 
 					if (MDODflow[m][Orig][Dest] > 0.000001)
 					{
-						if (CostTo[Orig][Dest] < 0.0)
+						int  internal_node_id_for_destination_zone = g_map_external_node_id_2_node_seq_no[Dest]; 
+						if (CostTo[Orig][internal_node_id_for_destination_zone] < 0.0)
 							ExitMessage("Negative cost %lg from Origin %d to Destination %d.",
 								(double)CostTo[Orig][Dest], Orig, Dest);
-
-						// CostTo is coded as internal node id 
-						int  internal_node_id_for_destination_zone  = g_map_external_node_id_2_node_seq_no[Dest]; 
 
 						if (CostTo[Orig][internal_node_id_for_destination_zone] <= BIGM - 1)  // feasible cost 
 						{
@@ -1143,7 +1146,7 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
 					if (Dest == Orig)
 						continue;
 
-					if (shortest_path_log_flag || Assignment_iteration_no == 0)
+					if (route_output_flag || Assignment_iteration_no == 0)
 						currentLinkSequence.clear();
 
 					RouteFlow = ODflow[m][Orig][Dest];  //test
@@ -1195,7 +1198,7 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
 
 						if(linkIndices.size() >0)
 						{
-						if (shortest_path_log_flag || Assignment_iteration_no == 0)
+						if (route_output_flag || Assignment_iteration_no == 0)
 						{
 #pragma omp critical
 							{
@@ -1207,9 +1210,12 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
 
 							if (linkIndices.size() > 0)
 							{
-								if (shortest_path_log_flag || Assignment_iteration_no == 0)
+								if (route_output_flag || Assignment_iteration_no == 0)
 								{
-									AddLinkSequence(m, Orig, Dest, Assignment_iteration_no, currentLinkSequence);
+									int origin_seq_no = g_map_external_node_id_2_node_seq_no[Orig];
+									int destination_seq_no = g_map_external_node_id_2_node_seq_no[Dest];
+
+									AddLinkSequence(m, origin_seq_no, destination_seq_no, Assignment_iteration_no, currentLinkSequence);
 									// Store the link sequence for this OD pair
 
 								}
@@ -1998,18 +2004,22 @@ void OutputRouteDetails(const std::string& filename, std::vector<double> theta)
 					double accumulatedTheta = rd.accumulatedTheta;
 					if (TotalAssignIterations <= 1)
 						accumulatedTheta = 1.0;
+					int org_origin_zone = g_map_node_seq_no_2_external_node_id[Orig];
+					int org_dest_zone = g_map_node_seq_no_2_external_node_id[Dest];
 
 					if(MDODflow!=NULL)
 					{
-						seed_od_volume = seed_MDODflow[m][Orig][Dest];
-						od_volume = MDODflow[m][Orig][Dest];
-						target_od_volume = targetMDODflow[m][Orig][Dest];
+
+
+						seed_od_volume = seed_MDODflow[m][org_origin_zone][org_dest_zone];
+						od_volume = MDODflow[m][org_origin_zone][org_dest_zone];
+						target_od_volume = targetMDODflow[m][org_origin_zone][org_dest_zone];
 						route_volume = od_volume * accumulatedTheta;
 					} 
 
 
 
-					if(no_zones <1000 || (no_zones>=1000 && od_volume >=1.0))
+					if(no_zones <3000 || (no_zones>=3000 && od_volume >=1.0))
 					{
 					// (Optional) Remove trailing semicolon from linkIDsStr if needed.
 					std::string cleanedLinkIDsStr = rd.linkIDsStr;
@@ -2018,8 +2028,8 @@ void OutputRouteDetails(const std::string& filename, std::vector<double> theta)
 
 					outputFile << g_mode_type_vector[m].mode_type.c_str() << ","
 						<< rd.firstRouteID << ","  // or route_id (the first candidate id)
-						<< Orig << ","
-						<< Dest << ","
+						<< org_origin_zone << ","
+						<< org_dest_zone << ","
 						<< rd.unique_route_id << ","
 						<< accumulatedTheta << ","
 						<< rd.nodeIDsStr << ","
@@ -2210,8 +2220,12 @@ void OutputVehicleDetails(const std::string& filename, std::vector<double> theta
 				// Now output the unique routes with their accumulated theta values.
 				for (const auto& pair : uniqueRoutes)
 				{
+
+					int org_origin_zone = g_map_node_seq_no_2_external_node_id[Orig];
+					int org_dest_zone = g_map_node_seq_no_2_external_node_id[Dest];
+
 					const RouteData& rd = pair.second;
-					float od_volume = MDODflow[m][Orig][Dest];
+					float od_volume = MDODflow[m][org_origin_zone][org_dest_zone];
 					float route_volume = od_volume * rd.accumulatedTheta;
 
 					if (!linkIndices[m][Orig][Dest][rd.firstRouteID].empty())
@@ -2294,7 +2308,7 @@ void OutputVehicleDetails(const std::string& filename, std::vector<double> theta
 								outputFile << agent_id << "," << departure_time << ","
 									<< departure_time_hhmmss << ","
 									<< g_mode_type_vector[m].mode_type.c_str() << ","
-									<< rd.firstRouteID << "," << Orig << "," << Dest << "," << unique_route_id << ","
+									<< rd.firstRouteID << "," << org_origin_zone << "," << org_dest_zone << "," << unique_route_id << ","
 									<< nodeIDsStr << "," << linkIDsStr << ","
 									<< totalDistance << "," << totalDistance * 1.609 << "," << totalFreeFlowTravelTime << ","
 									<< totalTravelTime << "," << rd.firstRouteID << "," << route_volume << "\n";
@@ -2909,7 +2923,7 @@ void read_settings_file()
 			parser_settings.GetValueByFieldName("base_demand_mode", g_base_demand_mode);
 			parser_settings.GetValueByFieldName("odme_mode", g_ODME_mode);
 			parser_settings.GetValueByFieldName("odme_vmt", g_ODME_obs_VMT);
-			parser_settings.GetValueByFieldName("route_output", shortest_path_log_flag);
+			parser_settings.GetValueByFieldName("route_output", route_output_flag);
 			parser_settings.GetValueByFieldName("vehicle_output", vehicle_log_flag);
 
 			
@@ -2999,9 +3013,9 @@ void read_mode_type_file()
 	return;
 }
 // Initialize the 5D vector
-void InitializeLinkIndices(int num_modes, int no_zones, int max_routes)
+void InitializeLinkIndices(int num_modes, int no_sequential_zones, int max_routes)
 {
-
+	
 
 	auto start = std::chrono::high_resolution_clock::now();  // Start timing
 
@@ -3010,9 +3024,9 @@ void InitializeLinkIndices(int num_modes, int no_zones, int max_routes)
 	linkIndices = std::vector<std::vector<std::vector<std::vector<std::vector<int>>>>>(
 		num_modes + 1,
 		std::vector<std::vector<std::vector<std::vector<int>>>>(
-			no_zones + 1,
+			no_sequential_zones + 1,
 			std::vector<std::vector<std::vector<int>>>(
-				no_zones + 1,
+				no_sequential_zones + 1,
 				std::vector<std::vector<int>>(
 					max_routes + 1
 				)
@@ -3034,7 +3048,7 @@ void InitializeLinkIndices(int num_modes, int no_zones, int max_routes)
 	auto seconds = std::chrono::duration_cast<std::chrono::seconds>(duration % std::chrono::minutes(1));
 	auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(duration % std::chrono::seconds(1));
 
-	printf("Memmory creation time for 5D link path matrix: %lld hours %lld minutes %lld seconds %lld ms\n", hours.count(), minutes.count(), seconds.count(), milliseconds.count());
+	printf("Memory creation time for 5D link path matrix: %lld hours %lld minutes %lld seconds %lld ms\n", hours.count(), minutes.count(), seconds.count(), milliseconds.count());
 }
 
 int AssignmentAPI()
@@ -3098,8 +3112,12 @@ int AssignmentAPI()
 
 	Init(number_of_modes, no_zones);
 
-	if(g_accessibility_only_mode ==0) 
-		 InitializeLinkIndices(number_of_modes, no_zones, TotalAssignIterations);
+	if(g_accessibility_only_mode ==0 && route_output_flag) 
+	{ 
+		int no_sequential_zones =  g_map_external_node_id_2_node_seq_no[no_zones];
+	
+		 InitializeLinkIndices(number_of_modes, no_sequential_zones, TotalAssignIterations);
+	}
 
 	for (int i = 1; i <= no_nodes; i++)
 		{
@@ -3374,7 +3392,7 @@ int AssignmentAPI()
 
 	GenerateAggregatedPerformanceAndAccessibility();
 
-	if (shortest_path_log_flag)
+	if (route_output_flag)
 	{
 		OutputRouteDetails("route_assignment.csv", m_theta);
 		if (vehicle_log_flag)
@@ -3454,6 +3472,9 @@ int AssignmentAPI()
 
 		fprintf(link_performance_file, "\n");
 	}
+
+	linkIndices.clear();
+	linkIndices.shrink_to_fit();
 
 	free(MainVolume);
 	free(SubVolume);
@@ -6125,21 +6146,24 @@ int mapmatchingAPI() {
 				std::vector<double> m_theta; 
 
 
-				OutputRouteDetails("route_assignment.csv", m_theta);
+	OutputRouteDetails("route_assignment.csv", m_theta);
 	
 	Free_3D((void***)MDMinPathPredLink, number_of_modes, no_zones, no_nodes); 
 	Free_2D((void**)CostTo, no_zones, no_nodes);
 	return 0;
 }
 
-int main()
+void main()
 {
-	//mapmatchingAPI();
-	//
 	AssignmentAPI();
-	//SimulationAPI();
+
 }
 
-void DTALiteAPI() {
-	main();
+
+void DTA_AssignmentAPI() {
+AssignmentAPI();
+}
+
+void DTA_SimulationAPI() {
+SimulationAPI();
 }
