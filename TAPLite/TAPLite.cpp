@@ -3172,7 +3172,7 @@ int AssignmentAPI()
 	system_wide_travel_time = UpdateLinkCost(MainVolume);  // set up the cost first using FFTT
 
 	fprintf(link_performance_file,
-		"iteration_no,link_id,from_node_id,to_node_id,volume,ref_volume,base_demand_volume,obs_volume,background_volume,"
+		"iteration_no,link_id,from_node_id,to_node_id,length_meter,vdf_length_mi,vehicle_volume,person_volume,ref_vhc_olume,base_demand_volume,obs_volume,background_volume,"
 		"link_capacity,lane_capacity,D,doc,vdf_fftt,travel_time,vdf_alpha,vdf_beta,vdf_plf,speed_mph,speed_kmph,VMT,VHT,PMT,PHT,VHT_QVDF,PHT_QVDF,geometry,");
 
 	fprintf(logfile, "iteration_no,link_id,from_node_id,to_node_id,volume,ref_volume,obs_volume,capacity,doc,fftt,travel_time,delay,");
@@ -3425,24 +3425,29 @@ int AssignmentAPI()
 
 
 		double VMT, VHT, PMT, PHT, VHT_QVDF, PHT_QVDF;
+		double person_volume = 0;
+
 		VMT = 0; VHT = 0;  PMT = 0; PHT = 0; VHT_QVDF = 0; PHT_QVDF = 0;
+
+		VMT += MainVolume[k] * Link[k].length;
+		VHT += MainVolume[k] * Link[k].Travel_time / 60.0;
+		VHT_QVDF += MainVolume[k] * Link[k].QVDF_TT / 60.0;
+
 		for (int m = 1; m <= number_of_modes; m++)
 		{
-			VMT += MainVolume[k] * Link[k].length;
-			VHT += MainVolume[k] * Link[k].Travel_time / 60.0;
 
-			PMT += Link[k].mode_MainVolume[m] * g_mode_type_vector[m].occ * Link[k].length;
-			PHT += Link[k].mode_MainVolume[m] * g_mode_type_vector[m].occ * Link[k].Travel_time / 60.0;
-
-			VHT_QVDF += MainVolume[k] * Link[k].QVDF_TT / 60.0;
-			PHT_QVDF += Link[k].mode_MainVolume[m] * g_mode_type_vector[m].occ * Link[k].QVDF_TT / 60.0;
-
-
+			person_volume += Link[k].mode_MainVolume[m]*g_mode_type_vector[m].occ;
 		}
 
-		fprintf(link_performance_file, "%d,%d,%d,%d,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,",
-			iteration_no, Link[k].link_id, Link[k].external_from_node_id, Link[k].external_to_node_id,
-			MainVolume[k], Link[k].Ref_volume, Link[k].Base_demand_volume, Link[k].Obs_volume[1], Link[k].background_volume, Link[k].Link_Capacity, Link[k].Lane_Capacity, IncomingDemand, DOC, Link[k].FreeTravelTime,
+		PMT = person_volume * Link[k].length;
+		PHT = person_volume * Link[k].Travel_time / 60.0;
+
+
+		PHT_QVDF += person_volume * Link[k].QVDF_TT / 60.0;
+
+		fprintf(link_performance_file, "%d,%d,%d,%d,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,",
+			iteration_no, Link[k].link_id, Link[k].external_from_node_id, Link[k].external_to_node_id, Link[k].length*1609.0, Link[k].length,
+			MainVolume[k], person_volume, Link[k].Ref_volume, Link[k].Base_demand_volume, Link[k].Obs_volume[1], Link[k].background_volume, Link[k].Link_Capacity, Link[k].Lane_Capacity, IncomingDemand, DOC, Link[k].FreeTravelTime,
 			Link[k].Travel_time, Link[k].VDF_Alpha, Link[k].VDF_Beta, Link[k].VDF_plf, Link[k].length / fmax(Link[k].Travel_time / 60.0, 0.001), Link[k].length / fmax(Link[k].Travel_time / 60.0, 0.001) * 1.609, Link[k].Travel_time - Link[k].FreeTravelTime);
 
 		fprintf(link_performance_file, "%2lf,%2lf,%2lf,%2lf,%2lf,%2lf,", VMT, VHT, PMT, PHT, VHT_QVDF, PHT_QVDF);
@@ -3473,8 +3478,14 @@ int AssignmentAPI()
 		fprintf(link_performance_file, "\n");
 	}
 
+
+
 	linkIndices.clear();
 	linkIndices.shrink_to_fit();
+
+	g_map_external_node_id_2_node_seq_no.clear();
+	g_map_node_seq_no_2_external_node_id.clear();
+	g_map_internal_zone_no_2_node_seq_no.clear();
 
 	free(MainVolume);
 	free(SubVolume);
@@ -3487,6 +3498,7 @@ int AssignmentAPI()
 	fclose(link_performance_file);
 	fclose(logfile);  // Close the log file when you're done with it.
 	fclose(summary_log_file);
+
 	return 0;
 }
 
@@ -6156,12 +6168,12 @@ int mapmatchingAPI() {
 void main()
 {
 	AssignmentAPI();
-
 }
 
 
 void DTA_AssignmentAPI() {
 AssignmentAPI();
+
 }
 
 void DTA_SimulationAPI() {
