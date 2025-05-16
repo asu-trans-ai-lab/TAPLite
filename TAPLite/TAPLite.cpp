@@ -2652,9 +2652,13 @@ void GenerateAggregatedPerformanceAndAccessibility()
 						googleLink = "https://www.google.com/maps/dir/" + std::to_string(o_y) + "," + std::to_string(o_x) + "/" +
 							std::to_string(d_y) + "," + std::to_string(d_x) + "/";
 					}
+
+					int org_origin_zone = g_map_node_seq_no_2_external_node_id[Orig];
+					int org_dest_zone = g_map_node_seq_no_2_external_node_id[Dest];
+
 					inacFile << modeStr << ","
-						<< Orig << ","
-						<< Dest << ","
+						<< org_origin_zone << ","
+						<< org_dest_zone << ","
 						<< "\"" << googleLink << "\"" << "\n";
 				}
 			}
@@ -4848,6 +4852,9 @@ public:
 	double departure_time_in_min;
 	int departure_time_in_simu_interval; 
 	vector<int> path_link_sequence;
+	vector<int> path_node_sequence;	
+	vector<double> path_time_sequence;
+
 	int current_link_seq_no; 
 	bool loaded;
 	double desired_free_travel_time_ratio;
@@ -4898,10 +4905,13 @@ int read_vehicle_file(vector<shared_ptr<CAgent_Simu>>& agents) {
 		int agent_id;
 		double departure_time;  // in min 
 		string link_ids;
+		string node_ids;
 
 		if (!parser_vehicle.GetValueByFieldName("agent_id", agent_id) ||
 			!parser_vehicle.GetValueByFieldName("departure_time", departure_time) ||
-			!parser_vehicle.GetValueByFieldName("link_ids", link_ids)) {
+			!parser_vehicle.GetValueByFieldName("link_ids", link_ids)		||
+			!parser_vehicle.GetValueByFieldName("node_ids", node_ids)
+			) {
 			continue;
 		}
 
@@ -4910,8 +4920,26 @@ int read_vehicle_file(vector<shared_ptr<CAgent_Simu>>& agents) {
 		agent->departure_time_in_min = departure_time;
 	 
 		vector<int> path_sequence;  // store link sequence id k 
+		vector<int> path_node_sequence;  // store link sequence id k 
+
 		if (g_ParserIntSequence(link_ids, path_sequence) > 0) {
 			agent->path_link_sequence = path_sequence;
+
+			if (g_ParserIntSequence(node_ids, path_node_sequence) > 0) {
+				agent->path_node_sequence = path_node_sequence;
+			}
+
+			agent->path_time_sequence.push_back(departure_time);
+
+			float arrival_time = departure_time;
+			for (int l = 0; l < path_sequence.size(); l++)
+			{
+				int link_id = agent->path_link_sequence[l];
+				arrival_time += Link[link_id].FreeTravelTime;
+				agent->path_time_sequence.push_back(arrival_time);
+
+			}
+
 			agent->initializeTimes(path_sequence.size());
 			agent->agent_seq_no = agents.size();
 			parser_vehicle.GetValueByFieldName("o_zone_id", agent->o_zone_id);
@@ -5083,6 +5111,16 @@ private:
 		return ss.str();
 	}
 
+
+	string doubleVectorToString(const vector<double>& vec, const string& delimiter = ";") {
+		stringstream ss;
+		for (size_t i = 0; i < vec.size(); ++i) {
+			if (i > 0) ss << delimiter;
+			ss << vec[i];
+		}
+		return ss.str();
+	}
+
 	string formatTimesVector(const vector<double>& times, int l_demand_period_starting_hours, const string& delimiter = ";") {
 		stringstream ss;
 		for (size_t i = 0; i < times.size(); ++i) {
@@ -5102,7 +5140,7 @@ public:
 		agent_file.open("trajectory.csv");
 		// Write header
 		agent_file << "agent_id,departure_time,departure_time_hhmmss,loaded_status,o_zone_id,d_zone_id,distance,travel_time,"
-			<< "current_link_seq_no,link_ids,departure_time,arrival_time,geometry\n";
+			<< "current_link_seq_no,link_ids,node_sequence,departure_time,arrival_time,time_sequence,geometry\n";
 	}
 
 
@@ -5150,8 +5188,10 @@ public:
 			<< travel_time << ","
 			<< agent->current_link_seq_no << ","
 			<< vectorToString(agent->path_link_sequence) << ","
+			<< vectorToString(agent->path_node_sequence) << ","
 			<< formatTimesVector(agent->link_arrival_times, l_demand_period_starting_hours) << ","
 			<< formatTimesVector(agent->link_departure_times, l_demand_period_starting_hours) << ","
+			<< doubleVectorToString(agent->path_time_sequence) << ","
 			<< getTrajectoryGeometry(agent->path_link_sequence) << "\n";
 	}
 
