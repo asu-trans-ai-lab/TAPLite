@@ -11,7 +11,6 @@ extern "C" PATH_ENGINE_API void DTA_AssignmentAPI();
 
 extern "C" PATH_ENGINE_API void DTA_SimulationAPI();
 
-#define BUFFERSIZE 1000
 #define MAX_NO_BISECTITERATION 5 /* Avoids infinite loops */
 
 #include <fstream>

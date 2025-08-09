@@ -7,28 +7,17 @@
 // The enhanced C++ counterpart has served as the path engine for Path4GMNS and TransOMS.
 // https://github.com/jdlph/TAP101
 #define M_PI 3.14159265358979323846
-#define FLOAT_ACCURACY 1.0E-15
-#define NO_COSTPARAMETERS 4
-#define IVTT 0
-#define OVTT 1
-#define MONETARY 2
-#define DIST 3
 #define INVALID -1
-#define MAX_MODE_TYPES  10
-
-#define MIN(x, y) (((x) < (y)) ? (x) : (y))
-#define MAX(x, y) (((x) > (y)) ? (x) : (y))
-#define SQR(x) ((x) * (x))
-#define FABS(x) ((x) >= 0 ? (x) : (-x))
-#define VALID(x) ((x) != -1)
+#define MAX_MODE_TYPES 10
+#define _CRTDBG_MAP_ALLOC
 
 #include "TAPLite.h"
 
-
-#define _CRTDBG_MAP_ALLOC
+#ifdef _WIN32
 #include <crtdbg.h>
-#include <cstdlib>
+#endif
 
+#include <cstdlib>
 #include <cstdio>
 #include <cmath>
 #include <memory>
@@ -47,7 +36,6 @@
 
 using namespace std;
 
-typedef double cost_vector[NO_COSTPARAMETERS];
 
 #ifndef _WIN32
 void fopen_s(FILE** file, const char* fileName, const char* mode)
@@ -6222,7 +6210,7 @@ int mapmatchingAPI() {
 	return 0;
 }
 
-void main()
+int main()
 {
 	AssignmentAPI();
 
