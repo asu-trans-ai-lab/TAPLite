@@ -23,7 +23,7 @@ number_of_zones = 0
 number_of_modes = 1
 number_of_nodes = 0
 number_of_links = 0
-max_routes = 10;
+max_routes = 10
 first_thru_node = 0
 
 AssignIterations = 20
