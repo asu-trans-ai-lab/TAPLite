@@ -9,11 +9,12 @@
 #define M_PI 3.14159265358979323846
 #define INVALID -1
 #define MAX_MODE_TYPES 10
-#define _CRTDBG_MAP_ALLOC
+#define MAX_NO_BISECTITERATION 5 /* Avoids infinite loops */
 
 #include "TAPLite.h"
 
 #ifdef _WIN32
+#define _CRTDBG_MAP_ALLOC
 #include <crtdbg.h>
 #endif
 
