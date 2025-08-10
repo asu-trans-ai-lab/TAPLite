@@ -1,0 +1,15 @@
+---
+Language:        Cpp
+IndentWidth:     4
+PointerAlignment: Left
+ColumnLimit: 120
+
+AccessModifierOffset: -4
+AllowShortBlocksOnASingleLine: Empty
+
+BraceWrapping:
+  AfterFunction:   false
+  BeforeElse:      true
+  IndentBraces:    false
+
+BreakBeforeBraces: Custom
