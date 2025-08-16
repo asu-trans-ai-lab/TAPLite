@@ -3,7 +3,7 @@ import os
 import platform
 
 
-__all__ = ['assignment', 'simulation']
+__all__ = ['assignment', 'map_matching', 'simulation']
 
 
 _os = platform.system()
@@ -26,6 +26,10 @@ except OSError:
 
 def assignment():
     _lib.DTA_AssignmentAPI()
+
+
+def map_matching():
+    _lib.mapmatchingAPI()
 
 
 def simulation():

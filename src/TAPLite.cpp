@@ -239,7 +239,7 @@ void All_or_Nothing_Assign(double** ODflow, int** MinPathPredLink, double* Volum
 
 double LinksSDLineSearch(double* MainVolume, double* SDVolume);
 
-/* Gloabal variables */
+/* Global variables */
 
 int no_zones, number_of_modes, no_nodes, number_of_links, FirstThruNode;
 int number_of_internal_zones = 1;
@@ -289,7 +289,7 @@ int vehicle_log_flag = 0;
 int baseODDemand_loaded_flag = 0;
 int baselinkvolume_loaded_flag = 0;
 
-extern int SimulationAPI();
+void SimulationAPI();
 
 constexpr auto LCG_a = 17364;
 constexpr auto LCG_c = 0;
@@ -5026,7 +5026,7 @@ public:
     }
 };
 
-int SimulationAPI() {
+void SimulationAPI() {
 
     InitializeLinkIndices(number_of_modes, no_zones, TotalAssignIterations);
     int total_simu_time_intervals =
@@ -5038,8 +5038,6 @@ int SimulationAPI() {
     simulator.setupLink_queue();
     simulator.loadAgents(agents, demand_period_starting_hours * 3600 / number_of_seconds_per_interval);
     simulator.simulate(total_simu_time_intervals, demand_period_starting_hours);
-
-    return 0;
 }
 
 //// map_matching.cpp
@@ -5448,7 +5446,7 @@ void determineOriginDestinationNodes(const std::vector<GPSPoint>& trace, const M
 // -------------------------
 // Example main() demonstrating advanced grid-based matching using MMLink
 // -------------------------
-int mapmatchingAPI() {
+void mapmatchingAPI() {
 
     fopen_s(&summary_log_file, "summary_log_file.txt", "w");
     double *MainVolume, *SubVolume, *SDVolume, Lambda;
@@ -5640,7 +5638,6 @@ int mapmatchingAPI() {
 
     Free_3D((void***)MDMinPathPredLink, number_of_modes, no_zones, no_nodes);
     Free_2D((void**)CostTo, no_zones, no_nodes);
-    return 0;
 }
 
 int main() { AssignmentAPI(); }

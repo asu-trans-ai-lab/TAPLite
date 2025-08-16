@@ -1,14 +1,15 @@
-#ifndef GUARD_PATH_ENGINE_H
-#define GUARD_PATH_ENGINE_H
+#ifndef GUARD_TAPLITE_H
+#define GUARD_TAPLITE_H
 
 #ifdef _WIN32
-#define PATH_ENGINE_API __declspec(dllexport)
+#define TAPLITE_API __declspec(dllexport)
 #else
-#define PATH_ENGINE_API
+#define TAPLITE_API
 #endif
 
-extern "C" PATH_ENGINE_API void DTA_AssignmentAPI();
-extern "C" PATH_ENGINE_API void DTA_SimulationAPI();
+extern "C" TAPLITE_API void DTA_AssignmentAPI();
+extern "C" TAPLITE_API void DTA_SimulationAPI();
+extern "C" TAPLITE_API void mapmatchingAPI();
 
 #include <algorithm>
 #include <cctype>
