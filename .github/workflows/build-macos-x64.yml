@@ -1,0 +1,31 @@
+name: Build macOS-X64
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build macos
+    runs-on: macos-13
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Select Xcode 15.2
+        run: sudo xcode-select -s /Applications/Xcode_15.2.app
+
+      - name: "Install Homebrew"
+        run: /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+      - name: "Install required packages."
+        run: |
+          brew update
+          brew install libomp
+
+      - name: "Build"
+        run: |
+          rm -rf build 
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_EXE=OFF
+          cmake --build build
