@@ -1,0 +1,27 @@
+name: Build Windows
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Windows
+    runs-on: windows-2019
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Build
+        run: |
+          mkdir build 
+          cmake -R . -B build -DBUILD_EXE=OFF
+          cmake --build build --config Release
+
+      - name: Upload build directory as artifact
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-directory
+          path: build/

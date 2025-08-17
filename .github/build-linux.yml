@@ -1,0 +1,26 @@
+name: Build Linux
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Linux
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: "Update apt get"
+        run: sudo apt-get update && sudo apt-get upgrade -y
+
+      - name: "Install required packages."
+        run: sudo apt-get install -y build-essential g++ cmake
+
+      - name: "Build"
+        run: | 
+          rm -rf build
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_EXE=OFF
+          cmake --build build
