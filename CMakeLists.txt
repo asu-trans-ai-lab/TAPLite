@@ -14,12 +14,21 @@ endif()
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_BUILD_TYPE Release)
 
+# default target name for Windows and Linux
 string(TOLOWER ${PROJECT_NAME} TARGET_NAME)
+
+if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    if(CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "arm64")
+        string(APPEND TARGET_NAME "_arm")
+    elseif(CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "x86_64")
+        string(APPEND TARGET_NAME "_x64")
+    endif()
+endif()
 
 if(BUILD_EXE)
     add_executable(${TARGET_NAME} src/TAPLite.cpp)
 else()
-    add_library(${TARGET_NAME} src/TAPLite.cpp)
+    add_library(${TARGET_NAME} SHARED src/TAPLite.cpp)
 endif()
 
 find_package(OpenMP REQUIRED)

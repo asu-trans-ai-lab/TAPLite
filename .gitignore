@@ -2,6 +2,7 @@ build
 .DS_Store
 .vscode
 .cache
+taplite.egg-info
 
 logfile.txt
 summary_log_file.txt

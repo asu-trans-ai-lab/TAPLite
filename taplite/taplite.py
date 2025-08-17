@@ -8,7 +8,10 @@ __all__ = ['assignment', 'map_matching', 'simulation']
 
 _os = platform.system()
 if _os == 'Darwin':
-    lib_name = 'libtaplite.dylib'
+    if platform.machine().startswith('x86_64'):
+        lib_name = 'libtaplite_x64.dylib'
+    else:
+        lib_name = 'libtaplite_arm.dylib'
 elif _os == 'Windows':
     lib_name = 'taplite.dll'
 elif _os == 'Linux':
