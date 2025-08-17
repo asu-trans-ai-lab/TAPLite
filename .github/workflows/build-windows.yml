@@ -15,9 +15,10 @@ jobs:
 
       - name: Build
         run: |
-          mkdir build 
-          cmake -R . -B build -DBUILD_EXE=OFF
-          cmake --build build --config Release
+          mkdir build
+          cd build
+          cmake ..
+          cmake --build . --config Release
 
       - name: Upload build directory as artifact
         if: failure()
