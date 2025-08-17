@@ -198,7 +198,7 @@ mode_type g_mode_type_vector[MAX_MODE_TYPES];
 int g_metric_system_flag = 1;
 void StatusMessage(const char* group, const char* format, ...);
 
-struct link_record* Link;
+struct link_record* Links;
 int* FirstLinkFrom; // used in shortet path algorithm
 int* LastLinkFrom;
 
@@ -285,7 +285,7 @@ static void CloseODflow(void);
 FILE* logfile;
 int route_output_flag = 0;
 int simulation_output_flag = 0;
-int vehicle_log_flag = 0;
+int vehicle_log_flag = 1;
 int baseODDemand_loaded_flag = 0;
 int baselinkvolume_loaded_flag = 0;
 
@@ -409,14 +409,14 @@ int Minpath(int mode, int Orig, int* PredLink, double* CostTo) // CostTo is base
     while ((now != INVALID) && (now != WAS_IN_QUEUE)) {
         if (now >= FirstThruNode || now == internal_node_id_for_origin_zone) {
             for (k = FirstLinkFrom[now]; k <= LastLinkFrom[now]; k++) {
-                if (Link[k].mode_allowed_use[mode] == 0)
+                if (Links[k].mode_allowed_use[mode] == 0)
                     continue;
 
-                NewNode = Link[k].internal_to_node_id;
-                NewCost = CostTo[now] + Link[k].Travel_time + Link[k].mode_AdditionalCost[mode];
+                NewNode = Links[k].internal_to_node_id;
+                NewCost = CostTo[now] + Links[k].Travel_time + Links[k].mode_AdditionalCost[mode];
 
                 // Check if the previous link (PrevLink[now]) has restrictions on this link (k)
-                if (PrevLink[now] != INVALID && Link[PrevLink[now]].b_withmovement_restrictions == true) {
+                if (PrevLink[now] != INVALID && Links[PrevLink[now]].b_withmovement_restrictions == true) {
                     if (IsMovementRestricted(PrevLink[now], k))
                         continue; // Skip restricted movement
                 }
@@ -719,7 +719,7 @@ int ComputeAccessibilityAndODCosts_v1(const char* filename) {
     double** CostTo = (double**)Alloc_2D(50, no_nodes + 1, sizeof(double));
 
     for (int k = 1; k <= number_of_links; k++)
-        Link[k].Travel_time = Link[k].FreeTravelTime;
+        Links[k].Travel_time = Links[k].FreeTravelTime;
 
     // Store the link sequences for each OD pair
     // Simplified to 2D vector: first dimension is origin zone, second is destination zone
@@ -762,10 +762,10 @@ int ComputeAccessibilityAndODCosts_v1(const char* filename) {
                                 int linkId = PredLink[p][currentNode];
                                 if (linkId == -1)
                                     break;
-                                pathDistance += Link[linkId].length;
-                                freeFlowTime += Link[linkId].FreeTravelTime;
-                                congestionTime += Link[linkId].Travel_time;
-                                currentNode = Link[linkId].internal_from_node_id;
+                                pathDistance += Links[linkId].length;
+                                freeFlowTime += Links[linkId].FreeTravelTime;
+                                congestionTime += Links[linkId].Travel_time;
+                                currentNode = Links[linkId].internal_from_node_id;
                             }
 
                             int internal_node_id = g_map_external_node_id_2_node_seq_no[Orig];
@@ -836,7 +836,7 @@ int ComputeAccessibilityAndODCosts_v2(const char* filename) {
 
     // Set each link's travel time to its free travel time.
     for (int k = 1; k <= number_of_links; k++) {
-        Link[k].Travel_time = Link[k].FreeTravelTime;
+        Links[k].Travel_time = Links[k].FreeTravelTime;
     }
 
     // Prepare aggregation vectors for zone-based statistics.
@@ -903,10 +903,10 @@ int ComputeAccessibilityAndODCosts_v2(const char* filename) {
                                 int linkId = PredLink[0][currentNode];
                                 if (linkId == -1)
                                     break;
-                                pathDistance += Link[linkId].length;
-                                freeFlowTime += Link[linkId].FreeTravelTime;
-                                congestionTime += Link[linkId].Travel_time;
-                                currentNode = Link[linkId].internal_from_node_id;
+                                pathDistance += Links[linkId].length;
+                                freeFlowTime += Links[linkId].FreeTravelTime;
+                                congestionTime += Links[linkId].Travel_time;
+                                currentNode = Links[linkId].internal_from_node_id;
                             }
 
                             int internal_node_id = g_map_external_node_id_2_node_seq_no[Orig];
@@ -1174,7 +1174,7 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
                         ProcessorVolume[k][p] += RouteFlow * g_mode_type_vector[m].pce;
                         ProcessorModeVolume[k][m][p] += RouteFlow; // pure volume
 
-                        CurrentNode = Link[k].internal_from_node_id;
+                        CurrentNode = Links[k].internal_from_node_id;
 
                         if (CurrentNode <= 0 || CurrentNode > no_nodes) {
                             printf("A problem in All_or_Nothing_Assign() Invalid node seq no %d Orig zone = %d \n\n",
@@ -1210,17 +1210,17 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
     if (Assignment_iteration_no == 0) // with base demand
     {
         for (int k = 1; k <= number_of_links; k++) {
-            Volume[k] = Link[k].Base_demand_volume;
+            Volume[k] = Links[k].Base_demand_volume;
 
             for (int p = 0; p < g_number_of_processors; p++) {
                 Volume[k] += ProcessorVolume[k][p];
             }
 
             for (int m = 1; m <= number_of_modes; m++) {
-                Link[k].mode_MainVolume[m] = Link[k].mode_Base_demand_volume[m];
+                Links[k].mode_MainVolume[m] = Links[k].mode_Base_demand_volume[m];
 
                 for (int p = 0; p < g_number_of_processors; p++) {
-                    Link[k].mode_MainVolume[m] += ProcessorModeVolume[k][m][p];
+                    Links[k].mode_MainVolume[m] += ProcessorModeVolume[k][m][p];
                 }
             }
         }
@@ -1235,10 +1235,10 @@ void All_or_Nothing_Assign(int Assignment_iteration_no, double*** ODflow, int***
             }
 
             for (int m = 1; m <= number_of_modes; m++) {
-                Link[k].mode_SubVolume[m] = 0.0;
+                Links[k].mode_SubVolume[m] = 0.0;
 
                 for (int p = 0; p < g_number_of_processors; p++) {
-                    Link[k].mode_SubVolume[m] += ProcessorModeVolume[k][m][p];
+                    Links[k].mode_SubVolume[m] += ProcessorModeVolume[k][m][p];
                 }
             }
         }
@@ -1858,7 +1858,7 @@ void OutputRouteDetails(const std::string& filename, std::vector<double> theta) 
                             int k = linkIndices[m][Orig][Dest][route_id][i];
 
                             // Append the from_node_id and accumulate its value.
-                            int fromNodeID = Link[k].external_from_node_id;
+                            int fromNodeID = Links[k].external_from_node_id;
                             nodeIDsStr += std::to_string(fromNodeID) + ";";
                             nodeSum += fromNodeID;
 
@@ -1869,13 +1869,13 @@ void OutputRouteDetails(const std::string& filename, std::vector<double> theta) 
                             linkSum += k;
 
                             // Sum the distance and travel times.
-                            totalDistance += Link[k].length;
-                            totalFreeFlowTravelTime += Link[k].FreeTravelTime;
-                            totalTravelTime += Link[k].Travel_time;
+                            totalDistance += Links[k].length;
+                            totalFreeFlowTravelTime += Links[k].FreeTravelTime;
+                            totalTravelTime += Links[k].Travel_time;
 
                             // For the first link in the (reversed) order, also add the to_node_id.
                             if (i == 0) {
-                                int toNodeID = Link[k].external_to_node_id;
+                                int toNodeID = Links[k].external_to_node_id;
                                 nodeIDsStr += std::to_string(toNodeID);
                                 nodeSum += toNodeID;
                             }
@@ -1966,7 +1966,7 @@ void OutputRouteDetails(const std::string& filename, std::vector<double> theta) 
                             // Record the travel time for this link
                             for (int i = linkIndices[m][Orig][Dest][rd.firstRouteID].size() - 1; i >= 0; --i) {
                                 int k = linkIndices[m][Orig][Dest][rd.firstRouteID][i];
-                                linkTravelTimes.push_back(Link[k].Travel_time);
+                                linkTravelTimes.push_back(Links[k].Travel_time);
                             }
 
                             int integer_volume = static_cast<int>(route_volume);
@@ -2045,7 +2045,7 @@ void OutputRouteDetails(const std::string& filename, std::vector<double> theta) 
                         // Process the route in reverse order (as in your code).
                         for (int i = linkIndices[m][Orig][Dest][rd.firstRouteID].size() - 1; i >= 0; --i) {
                             int k = linkIndices[m][Orig][Dest][rd.firstRouteID][i];
-                            Link[k].background_volume += route_volume;
+                            Links[k].background_volume += route_volume;
                         }
                     }
                 }
@@ -2103,8 +2103,8 @@ void OutputODPerformance(const std::string& filename) {
                         for (int i = linkIndices[m][Orig][Dest][route_id].size() - 1; i >= 0; --i) {
                             long k = linkIndices[m][Orig][Dest][route_id][i];
 
-                            int fromNodeID = Link[k].external_from_node_id;
-                            int internal_fromNodeID = Link[k].internal_from_node_id;
+                            int fromNodeID = Links[k].external_from_node_id;
+                            int internal_fromNodeID = Links[k].internal_from_node_id;
                             double from_x = g_node_vector[internal_fromNodeID].x;
                             double from_y = g_node_vector[internal_fromNodeID].y;
 
@@ -2114,13 +2114,13 @@ void OutputODPerformance(const std::string& filename) {
                             linkIDsStr += std::to_string(k) + ";";
                             linkSum += k;
 
-                            totalDistance += Link[k].length;
-                            totalFreeFlowTravelTime += Link[k].FreeTravelTime;
-                            totalTravelTime += Link[k].Travel_time;
+                            totalDistance += Links[k].length;
+                            totalFreeFlowTravelTime += Links[k].FreeTravelTime;
+                            totalTravelTime += Links[k].Travel_time;
 
                             if (i == 0) {
-                                int toNodeID = Link[k].external_to_node_id;
-                                int internal_toNodeID = Link[k].internal_to_node_id;
+                                int toNodeID = Links[k].external_to_node_id;
+                                int internal_toNodeID = Links[k].internal_to_node_id;
                                 double to_x = g_node_vector[internal_toNodeID].x;
                                 double to_y = g_node_vector[internal_toNodeID].y;
 
@@ -2136,16 +2136,16 @@ void OutputODPerformance(const std::string& filename) {
                             for (int i = linkIndices[m][Orig][Dest][route_id].size() - 1; i >= 0; --i) {
                                 long k = linkIndices[m][Orig][Dest][route_id][i];
 
-                                int fromNodeID = Link[k].external_from_node_id;
-                                int internal_fromNodeID = Link[k].internal_from_node_id;
+                                int fromNodeID = Links[k].external_from_node_id;
+                                int internal_fromNodeID = Links[k].internal_from_node_id;
                                 double from_x = g_node_vector[internal_fromNodeID].x;
                                 double from_y = g_node_vector[internal_fromNodeID].y;
 
                                 WKT_geometry += std::to_string(from_x) + " " + std::to_string(from_y) + ",";
 
                                 if (i == 0) {
-                                    int toNodeID = Link[k].external_to_node_id;
-                                    int internal_toNodeID = Link[k].internal_to_node_id;
+                                    int toNodeID = Links[k].external_to_node_id;
+                                    int internal_toNodeID = Links[k].internal_to_node_id;
                                     double to_x = g_node_vector[internal_toNodeID].x;
                                     double to_y = g_node_vector[internal_toNodeID].y;
 
@@ -2276,9 +2276,9 @@ void GenerateAggregatedPerformanceAndAccessibility() {
                     double totalTravelTime = 0.0;         // in minutes
                     for (int i = linkIndices[m][Orig][Dest][route_id].size() - 1; i >= 0; --i) {
                         long k = linkIndices[m][Orig][Dest][route_id][i];
-                        totalDistance += Link[k].length;
-                        totalFreeFlowTravelTime += Link[k].FreeTravelTime;
-                        totalTravelTime += Link[k].Travel_time;
+                        totalDistance += Links[k].length;
+                        totalFreeFlowTravelTime += Links[k].FreeTravelTime;
+                        totalTravelTime += Links[k].Travel_time;
                     }
 
                     float volume = MDODflow[m][Orig][Dest];
@@ -2849,7 +2849,7 @@ int AssignmentAPI() {
     auto start = std::chrono::high_resolution_clock::now();
 
     for (int k = 1; k <= number_of_links; k++) {
-        MainVolume[k] = Link[k].Base_demand_volume; // assign the base volume  to main volume
+        MainVolume[k] = Links[k].Base_demand_volume; // assign the base volume  to main volume
         SDVolume[k] = 0;
         SubVolume[k] = 0;
     }
@@ -2918,21 +2918,21 @@ int AssignmentAPI() {
     if (g_tap_log_file == 1) {
         for (int k = 1; k <= number_of_links; k++) {
             fprintf(logfile, "%d,%d,%d,%d,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,", iteration_no, k,
-                    Link[k].external_from_node_id, Link[k].external_to_node_id, MainVolume[k], Link[k].Ref_volume,
-                    Link[k].Obs_volume[1], Link[k].background_volume, Link[k].Link_Capacity,
-                    MainVolume[k] / fmax(0.01, Link[k].Link_Capacity), Link[k].FreeTravelTime, Link[k].Travel_time,
-                    Link[k].Travel_time - Link[k].FreeTravelTime);
+                    Links[k].external_from_node_id, Links[k].external_to_node_id, MainVolume[k], Links[k].Ref_volume,
+                    Links[k].Obs_volume[1], Links[k].background_volume, Links[k].Link_Capacity,
+                    MainVolume[k] / fmax(0.01, Links[k].Link_Capacity), Links[k].FreeTravelTime, Links[k].Travel_time,
+                    Links[k].Travel_time - Links[k].FreeTravelTime);
 
             for (int m = 1; m <= number_of_modes; m++)
-                fprintf(logfile, "%2lf,", Link[k].mode_MainVolume[m]);
+                fprintf(logfile, "%2lf,", Links[k].mode_MainVolume[m]);
 
             for (int m = 1; m <= number_of_modes; m++)
-                fprintf(logfile, "%2lf,", Link[k].Obs_volume[m]);
+                fprintf(logfile, "%2lf,", Links[k].Obs_volume[m]);
 
             fprintf(logfile, "%2lf,", MainVolume[k]);
 
             for (int m = 1; m <= number_of_modes; m++)
-                fprintf(logfile, "%2lf,", Link[k].mode_SubVolume[m]);
+                fprintf(logfile, "%2lf,", Links[k].mode_SubVolume[m]);
 
             fprintf(logfile, "\n");
         }
@@ -2964,9 +2964,9 @@ int AssignmentAPI() {
         g_System_VMT = 0;
 
         for (int k = 1; k <= number_of_links; k++) {
-            if (Link[k].link_type >= 1) // only include physical links
+            if (Links[k].link_type >= 1) // only include physical links
             {
-                g_System_VMT += MainVolume[k] * Link[k].length;
+                g_System_VMT += MainVolume[k] * Links[k].length;
             }
         }
 
@@ -2990,17 +2990,17 @@ int AssignmentAPI() {
         if (g_tap_log_file == 1) {
             for (int k = 1; k <= number_of_links; k++) {
                 fprintf(logfile, "%d,%d,%d,%d,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,", iteration_no, k,
-                        Link[k].external_from_node_id, Link[k].external_to_node_id, MainVolume[k], Link[k].Ref_volume,
-                        Link[k].Lane_Capacity, Link[k].Link_Capacity, MainVolume[k] / fmax(0.01, Link[k].Link_Capacity),
-                        Link[k].FreeTravelTime, Link[k].Travel_time, Link[k].Travel_time - Link[k].FreeTravelTime);
+                        Links[k].external_from_node_id, Links[k].external_to_node_id, MainVolume[k], Links[k].Ref_volume,
+                        Links[k].Lane_Capacity, Links[k].Link_Capacity, MainVolume[k] / fmax(0.01, Links[k].Link_Capacity),
+                        Links[k].FreeTravelTime, Links[k].Travel_time, Links[k].Travel_time - Links[k].FreeTravelTime);
 
                 for (int m = 1; m <= number_of_modes; m++)
-                    fprintf(logfile, "%2lf,", Link[k].mode_MainVolume[m]);
+                    fprintf(logfile, "%2lf,", Links[k].mode_MainVolume[m]);
 
                 fprintf(logfile, "%2lf,", SDVolume[k]);
 
                 for (int m = 1; m <= number_of_modes; m++)
-                    fprintf(logfile, "%2lf,", Link[k].mode_SDVolume[m]);
+                    fprintf(logfile, "%2lf,", Links[k].mode_SDVolume[m]);
 
                 fprintf(logfile, "\n");
             }
@@ -3046,7 +3046,7 @@ int AssignmentAPI() {
     m_theta = computeTheta(m_lambda);
 
     if (g_ODME_mode == 1)
-        performODME(m_theta, MainVolume, Link);
+        performODME(m_theta, MainVolume, Links);
 
     OutputODPerformance("od_performance.csv");
 
@@ -3061,8 +3061,8 @@ int AssignmentAPI() {
     for (int k = 1; k <= number_of_links; k++) {
 
         double P = 0;
-        double vt2 = Link[k].Cutoff_Speed;
-        double mu = Link[k].Lane_Capacity;
+        double vt2 = Links[k].Cutoff_Speed;
+        double mu = Links[k].Lane_Capacity;
         double Severe_Congestion_P;
         double model_speed[300];
         double t0 = 0;
@@ -3087,46 +3087,46 @@ int AssignmentAPI() {
         VHT_QVDF = 0;
         PHT_QVDF = 0;
 
-        VMT += MainVolume[k] * Link[k].length;
-        VHT += MainVolume[k] * Link[k].Travel_time / 60.0;
-        VHT_QVDF += MainVolume[k] * Link[k].QVDF_TT / 60.0;
+        VMT += MainVolume[k] * Links[k].length;
+        VHT += MainVolume[k] * Links[k].Travel_time / 60.0;
+        VHT_QVDF += MainVolume[k] * Links[k].QVDF_TT / 60.0;
 
         for (int m = 1; m <= number_of_modes; m++) {
 
-            person_volume += Link[k].mode_MainVolume[m] * g_mode_type_vector[m].occ;
+            person_volume += Links[k].mode_MainVolume[m] * g_mode_type_vector[m].occ;
         }
 
-        PMT = person_volume * Link[k].length;
-        PHT = person_volume * Link[k].Travel_time / 60.0;
+        PMT = person_volume * Links[k].length;
+        PHT = person_volume * Links[k].Travel_time / 60.0;
 
-        PHT_QVDF += person_volume * Link[k].QVDF_TT / 60.0;
+        PHT_QVDF += person_volume * Links[k].QVDF_TT / 60.0;
 
         fprintf(link_performance_file,
                 "%d,%d,%d,%d,%d,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,%."
                 "4lf,%.4lf,%.4lf,%.4lf,%.4lf,%.4lf,",
-                iteration_no, Link[k].link_id, Link[k].vdf_type, Link[k].external_from_node_id,
-                Link[k].external_to_node_id, Link[k].length * 1609.0, Link[k].length, MainVolume[k], person_volume,
-                Link[k].Ref_volume, Link[k].Base_demand_volume, Link[k].Obs_volume[1], Link[k].background_volume,
-                Link[k].Link_Capacity, Link[k].Lane_Capacity, IncomingDemand, DOC, Link[k].FreeTravelTime,
-                Link[k].Travel_time, Link[k].VDF_distance_factor, Link[k].VDF_Alpha, Link[k].VDF_Beta, Link[k].VDF_plf,
-                Link[k].length / fmax(Link[k].Travel_time / 60.0, 0.001),
-                Link[k].length / fmax(Link[k].Travel_time / 60.0, 0.001) * 1.609,
-                Link[k].Travel_time - Link[k].FreeTravelTime);
+                iteration_no, Links[k].link_id, Links[k].vdf_type, Links[k].external_from_node_id,
+                Links[k].external_to_node_id, Links[k].length * 1609.0, Links[k].length, MainVolume[k], person_volume,
+                Links[k].Ref_volume, Links[k].Base_demand_volume, Links[k].Obs_volume[1], Links[k].background_volume,
+                Links[k].Link_Capacity, Links[k].Lane_Capacity, IncomingDemand, DOC, Links[k].FreeTravelTime,
+                Links[k].Travel_time, Links[k].VDF_distance_factor, Links[k].VDF_Alpha, Links[k].VDF_Beta, Links[k].VDF_plf,
+                Links[k].length / fmax(Links[k].Travel_time / 60.0, 0.001),
+                Links[k].length / fmax(Links[k].Travel_time / 60.0, 0.001) * 1.609,
+                Links[k].Travel_time - Links[k].FreeTravelTime);
 
         fprintf(link_performance_file, "%2lf,%2lf,%2lf,%2lf,%2lf,%2lf,", VMT, VHT, PMT, PHT, VHT_QVDF, PHT_QVDF);
 
-        fprintf(link_performance_file, "\"%s\",", Link[k].geometry.c_str());
+        fprintf(link_performance_file, "\"%s\",", Links[k].geometry.c_str());
 
         for (int m = 1; m <= number_of_modes; m++)
-            fprintf(link_performance_file, "%2lf,", Link[k].mode_MainVolume[m]);
+            fprintf(link_performance_file, "%2lf,", Links[k].mode_MainVolume[m]);
 
         for (int m = 1; m <= number_of_modes; m++)
-            fprintf(link_performance_file, "%2lf,", Link[k].Obs_volume[m]);
+            fprintf(link_performance_file, "%2lf,", Links[k].Obs_volume[m]);
 
         fprintf(link_performance_file, "%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,%f,", P, t0, t2, t3,
-                vt2, vt2 * 1.609, mu, Q_gamma, Link[k].free_speed, Link[k].Cutoff_Speed, Link[k].free_speed * 1.609,
-                Link[k].Cutoff_Speed * 1.609, congestion_ref_speed, avg_queue_speed, avg_QVDF_period_speed,
-                congestion_ref_speed * 1.609, avg_queue_speed * 1.609, avg_QVDF_period_speed * 1.609, Link[k].QVDF_TT,
+                vt2, vt2 * 1.609, mu, Q_gamma, Links[k].free_speed, Links[k].Cutoff_Speed, Links[k].free_speed * 1.609,
+                Links[k].Cutoff_Speed * 1.609, congestion_ref_speed, avg_queue_speed, avg_QVDF_period_speed,
+                congestion_ref_speed * 1.609, avg_queue_speed * 1.609, avg_QVDF_period_speed * 1.609, Links[k].QVDF_TT,
                 Severe_Congestion_P);
         for (int t = demand_period_starting_hours * 60; t < demand_period_ending_hours * 60; t += 5) {
             int t_interval = t / 5;
@@ -3173,10 +3173,10 @@ static void Init(int int_number_of_modes, int input_no_zones) {
         // reset
         for (int k = 1; k <= number_of_links; k++) {
 
-            Link[k].Base_demand_volume = 0;
+            Links[k].Base_demand_volume = 0;
 
             for (int m = 1; m <= int_number_of_modes; m++) {
-                Link[k].mode_Base_demand_volume[m] = 0;
+                Links[k].mode_Base_demand_volume[m] = 0;
             }
         }
     }
@@ -3245,57 +3245,57 @@ void ReadLinks() {
                 continue;
             }
 
-            Link[k].setup(number_of_modes);
+            Links[k].setup(number_of_modes);
             std::string value;
 
             // Read link_id
-            parser_link.GetValueByFieldName("from_node_id", Link[k].external_from_node_id);
-            parser_link.GetValueByFieldName("to_node_id", Link[k].external_to_node_id);
-            parser_link.GetValueByFieldName("link_id", Link[k].link_id);
+            parser_link.GetValueByFieldName("from_node_id", Links[k].external_from_node_id);
+            parser_link.GetValueByFieldName("to_node_id", Links[k].external_to_node_id);
+            parser_link.GetValueByFieldName("link_id", Links[k].link_id);
 
-            Link[k].link_id = k; // rewrite using internal link id
-            parser_link.GetValueByFieldName("link_type", Link[k].link_type);
+            Links[k].link_id = k; // rewrite using internal link id
+            parser_link.GetValueByFieldName("link_type", Links[k].link_type);
 
-            Link[k].internal_from_node_id = Link[k].external_from_node_id;
-            Link[k].internal_to_node_id = Link[k].external_to_node_id;
+            Links[k].internal_from_node_id = Links[k].external_from_node_id;
+            Links[k].internal_to_node_id = Links[k].external_to_node_id;
 
-            if (g_map_external_node_id_2_node_seq_no.find(Link[k].external_from_node_id) !=
+            if (g_map_external_node_id_2_node_seq_no.find(Links[k].external_from_node_id) !=
                 g_map_external_node_id_2_node_seq_no.end()) {
-                Link[k].internal_from_node_id = g_map_external_node_id_2_node_seq_no[Link[k].external_from_node_id];
+                Links[k].internal_from_node_id = g_map_external_node_id_2_node_seq_no[Links[k].external_from_node_id];
             }
             else {
-                printf("Error in from_node_id =%d for link_id = %d\n", Link[k].external_from_node_id, Link[k].link_id);
+                printf("Error in from_node_id =%d for link_id = %d\n", Links[k].external_from_node_id, Links[k].link_id);
 
                 continue;
             }
 
-            if (Link[k].internal_from_node_id == 0) {
+            if (Links[k].internal_from_node_id == 0) {
                 printf("Error in Link[k].internal_from_node_id\n");
             }
-            if (g_map_external_node_id_2_node_seq_no.find(Link[k].external_to_node_id) !=
+            if (g_map_external_node_id_2_node_seq_no.find(Links[k].external_to_node_id) !=
                 g_map_external_node_id_2_node_seq_no.end()) {
-                Link[k].internal_to_node_id = g_map_external_node_id_2_node_seq_no[Link[k].external_to_node_id];
+                Links[k].internal_to_node_id = g_map_external_node_id_2_node_seq_no[Links[k].external_to_node_id];
             }
             else {
-                printf("Error in to_node_id =%d for link_id = %d\n", Link[k].external_to_node_id, Link[k].link_id);
+                printf("Error in to_node_id =%d for link_id = %d\n", Links[k].external_to_node_id, Links[k].link_id);
                 continue;
             }
 
-            g_node_vector[Link[k].internal_to_node_id].m_incoming_link_seq_no_vector.push_back(k);
-            g_node_vector[Link[k].internal_from_node_id].m_outgoing_link_seq_no_vector.push_back(k);
+            g_node_vector[Links[k].internal_to_node_id].m_incoming_link_seq_no_vector.push_back(k);
+            g_node_vector[Links[k].internal_from_node_id].m_outgoing_link_seq_no_vector.push_back(k);
 
-            parser_link.GetValueByFieldName("length", Link[k].length); // meter
-            Link[k].length = Link[k].length / 1609.0;                  // miles
+            parser_link.GetValueByFieldName("length", Links[k].length); // meter
+            Links[k].length = Links[k].length / 1609.0;                  // miles
 
             double vdf_length_mi = -1;
             parser_link.GetValueByFieldName("vdf_length_mi", vdf_length_mi);
 
             if (vdf_length_mi >= 0) // valid.
-                Link[k].length = vdf_length_mi;
+                Links[k].length = vdf_length_mi;
 
-            parser_link.GetValueByFieldName("ref_volume", Link[k].Ref_volume);
+            parser_link.GetValueByFieldName("ref_volume", Links[k].Ref_volume);
 
-            parser_link.GetValueByFieldName("non_uturn_flag", Link[k].non_uturn_flag);
+            parser_link.GetValueByFieldName("non_uturn_flag", Links[k].non_uturn_flag);
 
             for (int m = 1; m <= number_of_modes; m++) {
                 char CSV_field_name[50];
@@ -3306,52 +3306,52 @@ void ReadLinks() {
                 else {
                     sprintf(CSV_field_name, "obs_volume_%s", g_mode_type_vector[m].mode_type.c_str());
                 }
-                parser_link.GetValueByFieldName(CSV_field_name, Link[k].Obs_volume[m], false, false);
+                parser_link.GetValueByFieldName(CSV_field_name, Links[k].Obs_volume[m], false, false);
             }
 
             if (g_base_demand_mode == 1) {
 
-                parser_link.GetValueByFieldName("base_demand_volume", Link[k].Base_demand_volume);
-                total_base_link_volume += Link[k].Base_demand_volume;
+                parser_link.GetValueByFieldName("base_demand_volume", Links[k].Base_demand_volume);
+                total_base_link_volume += Links[k].Base_demand_volume;
 
                 if (number_of_modes == 1) // single mode
-                    Link[k].mode_Base_demand_volume[1] = Link[k].Base_demand_volume;
+                    Links[k].mode_Base_demand_volume[1] = Links[k].Base_demand_volume;
 
                 for (int m = 1; m <= number_of_modes; m++) {
                     std::string field_name = "base_vol_" + std::string(g_mode_type_vector[m].mode_type);
-                    parser_link.GetValueByFieldName(field_name.c_str(), Link[k].mode_Base_demand_volume[m]);
+                    parser_link.GetValueByFieldName(field_name.c_str(), Links[k].mode_Base_demand_volume[m]);
                 }
             }
 
-            Link[k].lanes = lanes;
-            Link[k].Lane_Capacity = capacity;
-            Link[k].Link_Capacity = lanes * capacity;
+            Links[k].lanes = lanes;
+            Links[k].Lane_Capacity = capacity;
+            Links[k].Link_Capacity = lanes * capacity;
 
-            parser_link.GetValueByFieldName("allowed_use", Link[k].allowed_uses);
+            parser_link.GetValueByFieldName("allowed_use", Links[k].allowed_uses);
 
             if (g_tap_log_file == 1) {
-                fprintf(logfile, "link %d->%d, node_seq_no %d->%d\n", Link[k].external_from_node_id,
-                        Link[k].external_to_node_id, Link[k].internal_from_node_id, Link[k].internal_to_node_id);
+                fprintf(logfile, "link %d->%d, node_seq_no %d->%d\n", Links[k].external_from_node_id,
+                        Links[k].external_to_node_id, Links[k].internal_from_node_id, Links[k].internal_to_node_id);
             }
 
             for (int m = 1; m <= number_of_modes; m++) {
-                Link[k].mode_allowed_use[m] = 1;
-                Link[k].mode_MainVolume[m] = 0;
-                Link[k].mode_SubVolume[m] = 0;
-                Link[k].mode_Toll[m] = 0;
-                Link[k].mode_AdditionalCost[m] = 0;
+                Links[k].mode_allowed_use[m] = 1;
+                Links[k].mode_MainVolume[m] = 0;
+                Links[k].mode_SubVolume[m] = 0;
+                Links[k].mode_Toll[m] = 0;
+                Links[k].mode_AdditionalCost[m] = 0;
             }
 
-            if (Link[k].allowed_uses.size() > 0 && Link[k].allowed_uses != "all") {
+            if (Links[k].allowed_uses.size() > 0 && Links[k].allowed_uses != "all") {
                 for (int m = 1; m <= number_of_modes; m++) {
-                    if (Link[k].allowed_uses.find(g_mode_type_vector[m].mode_type) !=
+                    if (Links[k].allowed_uses.find(g_mode_type_vector[m].mode_type) !=
                         std::string::npos) // otherwise, only an agent type is listed in this "allowed_uses", then this
                                            // agent type is allowed to travel on this link
                     {
-                        Link[k].mode_allowed_use[m] = 1; // found
+                        Links[k].mode_allowed_use[m] = 1; // found
                     }
                     else {
-                        Link[k].mode_allowed_use[m] = 0;
+                        Links[k].mode_allowed_use[m] = 0;
                     }
                 }
             }
@@ -3362,16 +3362,16 @@ void ReadLinks() {
 
             // Read capacity
 
-            Link[k].FreeTravelTime = Link[k].length / fmax(0.001, free_speed) * 60.0;
+            Links[k].FreeTravelTime = Links[k].length / fmax(0.001, free_speed) * 60.0;
 
-            parser_link.GetValueByFieldName("vdf_fftt", Link[k].FreeTravelTime, true);
+            parser_link.GetValueByFieldName("vdf_fftt", Links[k].FreeTravelTime, true);
 
-            parser_link.GetValueByFieldName("vdf_type", Link[k].vdf_type, false);
-            parser_link.GetValueByFieldName("vdf_distance_factor", Link[k].VDF_distance_factor, false);
+            parser_link.GetValueByFieldName("vdf_type", Links[k].vdf_type, false);
+            parser_link.GetValueByFieldName("vdf_distance_factor", Links[k].VDF_distance_factor, false);
 
-            parser_link.GetValueByFieldName("vdf_alpha", Link[k].VDF_Alpha, true);
-            parser_link.GetValueByFieldName("vdf_beta", Link[k].VDF_Beta, true);
-            parser_link.GetValueByFieldName("vdf_plf", Link[k].VDF_plf, true);
+            parser_link.GetValueByFieldName("vdf_alpha", Links[k].VDF_Alpha, true);
+            parser_link.GetValueByFieldName("vdf_beta", Links[k].VDF_Beta, true);
+            parser_link.GetValueByFieldName("vdf_plf", Links[k].VDF_plf, true);
 
             for (int m = 1; m <= number_of_modes; m++) {
                 char CSV_field_name[50];
@@ -3382,26 +3382,26 @@ void ReadLinks() {
                 else {
                     sprintf(CSV_field_name, "toll_%s", g_mode_type_vector[m].mode_type.c_str());
                 }
-                parser_link.GetValueByFieldName(CSV_field_name, Link[k].mode_Toll[m], false, false);
+                parser_link.GetValueByFieldName(CSV_field_name, Links[k].mode_Toll[m], false, false);
 
-                Link[k].mode_AdditionalCost[m] = Link[k].mode_Toll[m] / g_mode_type_vector[m].vot * 60.0;
+                Links[k].mode_AdditionalCost[m] = Links[k].mode_Toll[m] / g_mode_type_vector[m].vot * 60.0;
             }
 
             if (capacity > 0)
-                Link[k].BoverC = Link[k].VDF_Alpha / pow(capacity * lanes, Link[k].VDF_Beta);
+                Links[k].BoverC = Links[k].VDF_Alpha / pow(capacity * lanes, Links[k].VDF_Beta);
             else
-                Link[k].BoverC = 0;
+                Links[k].BoverC = 0;
 
-            parser_link.GetValueByFieldName("vdf_fp", Link[k].Q_fp);
-            parser_link.GetValueByFieldName("vdf_fd", Link[k].Q_fd);
-            parser_link.GetValueByFieldName("vdf_n", Link[k].Q_n);
-            parser_link.GetValueByFieldName("vdf_s", Link[k].Q_s);
+            parser_link.GetValueByFieldName("vdf_fp", Links[k].Q_fp);
+            parser_link.GetValueByFieldName("vdf_fd", Links[k].Q_fd);
+            parser_link.GetValueByFieldName("vdf_n", Links[k].Q_n);
+            parser_link.GetValueByFieldName("vdf_s", Links[k].Q_s);
 
-            Link[k].free_speed = free_speed;
-            Link[k].Cutoff_Speed =
+            Links[k].free_speed = free_speed;
+            Links[k].Cutoff_Speed =
                 free_speed *
                 0.75; // use 0.75 as default ratio, when free_speed = 70 mph, Cutoff_Speed = 52.8 mph in I-10 data set
-            parser_link.GetValueByFieldName("geometry", Link[k].geometry, false);
+            parser_link.GetValueByFieldName("geometry", Links[k].geometry, false);
             k++;
         }
 
@@ -3433,7 +3433,7 @@ void Load_Movement_Restrictions(const std::string& filename) {
             if (penalty >= 10 && ib_link_id >= 1 && ib_link_id <= number_of_links && ob_link_id >= 1 &&
                 ob_link_id <= number_of_links) {
                 InsertMovementRestriction(ib_link_id, ob_link_id, true);
-                Link[ib_link_id].b_withmovement_restrictions = true;
+                Links[ib_link_id].b_withmovement_restrictions = true;
             }
         }
 
@@ -3453,7 +3453,7 @@ static void InitLinkPointers(char* LinksFileName) {
     Node = 1;
 
     for (k = 1; k <= number_of_links; k++) {
-        internal_from_node_id = Link[k].internal_from_node_id;
+        internal_from_node_id = Links[k].internal_from_node_id;
         if (internal_from_node_id == Node)
             continue;
 
@@ -3506,7 +3506,7 @@ void InitLinks() {
     FILE* LinksFile;
     int k;
 
-    Link = (struct link_record*)Alloc_1D(number_of_links, sizeof(struct link_record));
+    Links = (struct link_record*)Alloc_1D(number_of_links, sizeof(struct link_record));
     ReadLinks();
 
     InitLinkPointers(LinksFileName);
@@ -3751,19 +3751,19 @@ int Read_ODtable(double*** ODtable, double*** DiffODtable, double*** Seed_ODtabl
 
 double Link_Travel_Time_BPR(int k, double* Volume) {
 
-    double IncomingDemand = Volume[k] / fmax(0.01, Link[k].lanes) /
+    double IncomingDemand = Volume[k] / fmax(0.01, Links[k].lanes) /
                             fmax(0.001, demand_period_ending_hours - demand_period_starting_hours) /
-                            fmax(0.0001, Link[k].VDF_plf);
+                            fmax(0.0001, Links[k].VDF_plf);
 
-    Link[k].Travel_time =
-        Link[k].FreeTravelTime *
-        (1.0 + Link[k].VDF_Alpha * (pow(IncomingDemand / fmax(0.1, Link[k].Link_Capacity), Link[k].VDF_Beta)));
+    Links[k].Travel_time =
+        Links[k].FreeTravelTime *
+        (1.0 + Links[k].VDF_Alpha * (pow(IncomingDemand / fmax(0.1, Links[k].Link_Capacity), Links[k].VDF_Beta)));
 
-    if (Link[k].Travel_time < 0)
-        Link[k].Travel_time = 0;
-    Link[k].BPR_TT = Link[k].Travel_time;
+    if (Links[k].Travel_time < 0)
+        Links[k].Travel_time = 0;
+    Links[k].BPR_TT = Links[k].Travel_time;
 
-    return (Link[k].Travel_time);
+    return (Links[k].Travel_time);
 }
 // helper: computes t/t0 = f(x; alpha, beta)
 inline double travel_time_ratio(double x, double alpha, double beta) {
@@ -3772,35 +3772,35 @@ inline double travel_time_ratio(double x, double alpha, double beta) {
 }
 
 double Link_Conical_Travel_Time(int k, double* Volume) {
-    double IncomingDemand = Volume[k] / fmax(0.01, Link[k].lanes) /
+    double IncomingDemand = Volume[k] / fmax(0.01, Links[k].lanes) /
                             fmax(0.001, demand_period_ending_hours - demand_period_starting_hours) /
-                            fmax(0.0001, Link[k].VDF_plf);
+                            fmax(0.0001, Links[k].VDF_plf);
 
-    double cap = fmax(0.1, Link[k].Link_Capacity);
+    double cap = fmax(0.1, Links[k].Link_Capacity);
     double x = IncomingDemand / cap;
 
     // compute the new travel-time ratio
-    double ratio = travel_time_ratio(x, Link[k].VDF_Alpha, Link[k].VDF_Beta);
+    double ratio = travel_time_ratio(x, Links[k].VDF_Alpha, Links[k].VDF_Beta);
 
     // apply to free‐flow time
-    Link[k].Travel_time = Link[k].FreeTravelTime * ratio;
+    Links[k].Travel_time = Links[k].FreeTravelTime * ratio;
 
     // guard against negative
-    if (Link[k].Travel_time < 0.0)
-        Link[k].Travel_time = 0.0;
+    if (Links[k].Travel_time < 0.0)
+        Links[k].Travel_time = 0.0;
 
     // store for legacy
-    Link[k].BPR_TT = Link[k].Travel_time;
+    Links[k].BPR_TT = Links[k].Travel_time;
 
-    return Link[k].Travel_time;
+    return Links[k].Travel_time;
 }
 
 double Link_Travel_Time(int k, double* Volume) {
 
-    if (Link[k].vdf_type == 0)
-        return Link_Travel_Time_BPR(k, Volume) + Link[k].VDF_distance_factor;
-    if (Link[k].vdf_type == 1)
-        return Link_Conical_Travel_Time(k, Volume) + Link[k].VDF_distance_factor;
+    if (Links[k].vdf_type == 0)
+        return Link_Travel_Time_BPR(k, Volume) + Links[k].VDF_distance_factor;
+    if (Links[k].vdf_type == 1)
+        return Link_Conical_Travel_Time(k, Volume) + Links[k].VDF_distance_factor;
 }
 
 double Link_QueueVDF(int k, double Volume, double& IncomingDemand, double& DOC, double& P, double& t0, double& t2,
@@ -3808,21 +3808,21 @@ double Link_QueueVDF(int k, double Volume, double& IncomingDemand, double& DOC, 
                      double& avg_queue_speed, double& avg_QVDF_period_speed, double& Severe_Congestion_P,
                      double model_speed[300]) {
 
-    IncomingDemand = Volume / fmax(0.01, Link[k].lanes) /
+    IncomingDemand = Volume / fmax(0.01, Links[k].lanes) /
                      fmax(0.001, demand_period_ending_hours - demand_period_starting_hours) /
-                     fmax(0.0001, Link[k].VDF_plf);
-    DOC = IncomingDemand / fmax(0.1, Link[k].Lane_Capacity);
+                     fmax(0.0001, Links[k].VDF_plf);
+    DOC = IncomingDemand / fmax(0.1, Links[k].Lane_Capacity);
 
-    double Travel_time = Link[k].FreeTravelTime * (1.0 + Link[k].VDF_Alpha * (pow(DOC, Link[k].VDF_Beta)));
+    double Travel_time = Links[k].FreeTravelTime * (1.0 + Links[k].VDF_Alpha * (pow(DOC, Links[k].VDF_Beta)));
 
-    congestion_ref_speed = Link[k].Cutoff_Speed;
+    congestion_ref_speed = Links[k].Cutoff_Speed;
     if (DOC < 1)
-        congestion_ref_speed = (1 - DOC) * Link[k].free_speed + DOC * Link[k].Cutoff_Speed;
+        congestion_ref_speed = (1 - DOC) * Links[k].free_speed + DOC * Links[k].Cutoff_Speed;
 
     // step 3.2 calculate speed from VDF based on D/C ratio
-    avg_queue_speed = congestion_ref_speed / (1.0 + Link[k].VDF_Alpha * pow(DOC, Link[k].VDF_Beta));
+    avg_queue_speed = congestion_ref_speed / (1.0 + Links[k].VDF_Alpha * pow(DOC, Links[k].VDF_Beta));
 
-    P = Link[k].Q_fd * pow(DOC, Link[k].Q_n); // applifed for both uncongested and congested conditions
+    P = Links[k].Q_fd * pow(DOC, Links[k].Q_n); // applifed for both uncongested and congested conditions
 
     double H = demand_period_ending_hours - demand_period_starting_hours;
 
@@ -3830,22 +3830,22 @@ double Link_QueueVDF(int k, double Volume, double& IncomingDemand, double& DOC, 
         avg_QVDF_period_speed = avg_queue_speed;
     else
         avg_QVDF_period_speed =
-            P / H * avg_queue_speed + (1.0 - P / H) * (congestion_ref_speed + Link[k].free_speed) / 2.0;
+            P / H * avg_queue_speed + (1.0 - P / H) * (congestion_ref_speed + Links[k].free_speed) / 2.0;
 
-    Link[k].QVDF_TT = Link[k].length / fmax(0.1, avg_QVDF_period_speed) * 60.0;
+    Links[k].QVDF_TT = Links[k].length / fmax(0.1, avg_QVDF_period_speed) * 60.0;
 
-    double base = Link[k].Q_fp * pow(P, Link[k].Q_s) + 1.0;
-    vt2 = Link[k].Cutoff_Speed / fmax(0.001, base);
+    double base = Links[k].Q_fp * pow(P, Links[k].Q_s) + 1.0;
+    vt2 = Links[k].Cutoff_Speed / fmax(0.001, base);
 
     t2 = (demand_period_starting_hours + demand_period_ending_hours) / 2.0;
     t0 = t2 - 0.5 * P;
     t3 = t2 + 0.5 * P;
 
-    Q_mu = std::min(Link[k].Lane_Capacity, IncomingDemand / std::max(0.01, P));
+    Q_mu = std::min(Links[k].Lane_Capacity, IncomingDemand / std::max(0.01, P));
 
     // use  as the lower speed compared to 8/15 values for the congested states
-    double RTT = Link[k].length / fmax(0.01, congestion_ref_speed);
-    double wt2 = Link[k].length / vt2 - RTT; // in hour
+    double RTT = Links[k].length / fmax(0.01, congestion_ref_speed);
+    double wt2 = Links[k].length / vt2 - RTT; // in hour
 
     // step 5 compute gamma parameter is controlled by the maximum queue
     Q_gamma =
@@ -3862,7 +3862,7 @@ double Link_QueueVDF(int k, double Volume, double& IncomingDemand, double& DOC, 
         double t = t_in_min / 60.0; // t in hour
         double td_queue = 0;
         double td_speed = 0;
-        model_speed[t_interval] = Link[k].free_speed;
+        model_speed[t_interval] = Links[k].free_speed;
 
         if (t0 <= t && t <= t3) // within congestion duration P
         {
@@ -3870,19 +3870,19 @@ double Link_QueueVDF(int k, double Volume, double& IncomingDemand, double& DOC, 
             td_queue = 0.25 * Q_gamma * pow((t - t0), 2) * pow((t - t3), 2);
             td_w = td_queue / fmax(0.001, Q_mu);
             // L/[(w(t)+RTT_in_hour]
-            td_speed = Link[k].length / (td_w + RTT);
+            td_speed = Links[k].length / (td_w + RTT);
         }
         else if (t < t0) // outside
         {
             td_queue = 0;
             double factor = (t - demand_period_starting_hours) / fmax(0.001, t0 - demand_period_starting_hours);
-            td_speed = (1 - factor) * Link[k].free_speed + factor * fmax(congestion_ref_speed, avg_queue_speed);
+            td_speed = (1 - factor) * Links[k].free_speed + factor * fmax(congestion_ref_speed, avg_queue_speed);
         }
         else // t> t3
         {
             td_queue = 0;
             double factor = (t - t3) / fmax(0.001, demand_period_ending_hours - t3);
-            td_speed = (1 - factor) * fmax(congestion_ref_speed, avg_queue_speed) + (factor)*Link[k].free_speed;
+            td_speed = (1 - factor) * fmax(congestion_ref_speed, avg_queue_speed) + (factor)*Links[k].free_speed;
         }
 
         // dtalog.output() << "td_queue t" << t << " =  " << td_queue << ", speed =" << td_speed << '\n';
@@ -3894,7 +3894,7 @@ double Link_QueueVDF(int k, double Volume, double& IncomingDemand, double& DOC, 
         double td_flow = 0; // default: get_volume_from_speed(td_speed, vf, k_critical, s3_m);
         model_speed[t_interval] = td_speed;
 
-        if (td_speed < Link[k].free_speed * 0.5)
+        if (td_speed < Links[k].free_speed * 0.5)
             Severe_Congestion_P += 5.0 / 60; // 5 min interval
     }
 
@@ -3902,28 +3902,28 @@ double Link_QueueVDF(int k, double Volume, double& IncomingDemand, double& DOC, 
 }
 
 double Link_Travel_Time_Integral_BPR(int k, double* Volume) {
-    double IncomingDemand = Volume[k] / fmax(0.01, Link[k].lanes) /
+    double IncomingDemand = Volume[k] / fmax(0.01, Links[k].lanes) /
                             fmax(0.001, demand_period_ending_hours - demand_period_starting_hours) /
-                            fmax(0.0001, Link[k].VDF_plf);
+                            fmax(0.0001, Links[k].VDF_plf);
     double integral = 0;
-    if (Link[k].VDF_Beta >= 0.0)
+    if (Links[k].VDF_Beta >= 0.0)
         integral += IncomingDemand +
-                    (Volume[k] * Link[k].FreeTravelTime *
-                     (1.0 + (Link[k].BoverC / (Link[k].VDF_Beta + 1)) * pow(IncomingDemand, Link[k].VDF_Beta + 1)));
+                    (Volume[k] * Links[k].FreeTravelTime *
+                     (1.0 + (Links[k].BoverC / (Links[k].VDF_Beta + 1)) * pow(IncomingDemand, Links[k].VDF_Beta + 1)));
 
     return integral;
 }
 
 double Link_Travel_Time_Integral_Conical(int k, double* Volume) {
-    double t0 = Link[k].FreeTravelTime;               // t₀
-    double c = std::fmax(0.1, Link[k].Link_Capacity); // capacity
+    double t0 = Links[k].FreeTravelTime;               // t₀
+    double c = std::fmax(0.1, Links[k].Link_Capacity); // capacity
 
-    double IncomingDemand = Volume[k] / fmax(0.01, Link[k].lanes) /
+    double IncomingDemand = Volume[k] / fmax(0.01, Links[k].lanes) /
                             fmax(0.001, demand_period_ending_hours - demand_period_starting_hours) /
-                            fmax(0.0001, Link[k].VDF_plf);
+                            fmax(0.0001, Links[k].VDF_plf);
 
     double x = IncomingDemand / c; // normalized flow
-    double α = Link[k].VDF_Alpha;
+    double α = Links[k].VDF_Alpha;
     double β = (2 * α - 1) / (2 * α - 2); // Spiess’s relation
 
     // helper
@@ -3947,34 +3947,34 @@ double Link_Travel_Time_Integral_Conical(int k, double* Volume) {
 double Link_Travel_Time_Integral(int k, double* Volume) {
     double integral = 0;
 
-    if (Link[k].vdf_type == 0)
+    if (Links[k].vdf_type == 0)
         integral = Link_Travel_Time_Integral_BPR(k, Volume);
 
-    if (Link[k].vdf_type == 1)
+    if (Links[k].vdf_type == 1)
         integral = Link_Travel_Time_Integral_Conical(k, Volume);
 
     return integral;
 }
 
 double Link_Travel_Time_Der(int k, double* Volume) {
-    if (Link[k].VDF_Beta == 0.0)
+    if (Links[k].VDF_Beta == 0.0)
         return 0.0;
     else
-        return (Link[k].FreeTravelTime * Link[k].BoverC * Link[k].VDF_Beta * pow(Volume[k], (Link[k].VDF_Beta - 1)));
+        return (Links[k].FreeTravelTime * Links[k].BoverC * Links[k].VDF_Beta * pow(Volume[k], (Links[k].VDF_Beta - 1)));
 }
 
 double AdditionalCost(int k, int m) {
     double AddCost = 0;
 
-    AddCost = Link[k].mode_Toll[m] / g_mode_type_vector[m].vot * 60.0;
+    AddCost = Links[k].mode_Toll[m] / g_mode_type_vector[m].vot * 60.0;
 
     return AddCost;
 }
 
-double Link_GenCost(int k, double* Volume) { return (Link[k].mode_AdditionalCost[1] + Link_Travel_Time(k, Volume)); }
+double Link_GenCost(int k, double* Volume) { return (Links[k].mode_AdditionalCost[1] + Link_Travel_Time(k, Volume)); }
 
 double LinkCost_Integral(int k, double* Volume) {
-    return (Link[k].mode_AdditionalCost[1] * Volume[k] + Link_Travel_Time_Integral(k, Volume));
+    return (Links[k].mode_AdditionalCost[1] * Volume[k] + Link_Travel_Time_Integral(k, Volume));
 }
 
 double Link_GenCostDer(int k, double* Volume) { return (Link_Travel_Time_Der(k, Volume)); }
@@ -3993,9 +3993,9 @@ void VolumeDifference(double* Volume1, double* Volume2, double* Difference) { //
         Difference[k] = Volume1[k] - Volume2[k];
 
         for (int m = 1; m <= number_of_modes; m++) {
-            Link[k].mode_SDVolume[m] = Link[k].mode_SubVolume[m] - Link[k].mode_MainVolume[m];
+            Links[k].mode_SDVolume[m] = Links[k].mode_SubVolume[m] - Links[k].mode_MainVolume[m];
 
-            if (fabs(Difference[k] - Link[k].mode_SDVolume[m]) > 0.01) {
+            if (fabs(Difference[k] - Links[k].mode_SDVolume[m]) > 0.01) {
                 printf("");
             }
         }
@@ -4010,7 +4010,7 @@ void UpdateVolume(double* MainVolume, double* SDVolume, double Lambda) {
 
     for (int k = 1; k <= number_of_links; k++) {
         for (int m = 1; m <= number_of_modes; m++) {
-            Link[k].mode_MainVolume[m] += Lambda * Link[k].mode_SDVolume[m];
+            Links[k].mode_MainVolume[m] += Lambda * Links[k].mode_SDVolume[m];
         }
     }
 }
@@ -4028,10 +4028,10 @@ double UpdateLinkCost(double* MainVolume) {
     double system_wide_travel_time = 0;
 
     for (k = 1; k <= number_of_links; k++) {
-        Link[k].Travel_time = Link_Travel_Time(k, MainVolume);
+        Links[k].Travel_time = Link_Travel_Time(k, MainVolume);
 
-        Link[k].GenCost = Link_GenCost(k, MainVolume);
-        system_wide_travel_time += (MainVolume[k] * Link[k].Travel_time);
+        Links[k].GenCost = Link_GenCost(k, MainVolume);
+        system_wide_travel_time += (MainVolume[k] * Links[k].Travel_time);
     }
 
     return system_wide_travel_time;
@@ -4041,7 +4041,7 @@ void UpdateLinkCostDer(double* MainVolume) {
     int k;
 
     for (k = 1; k <= number_of_links; k++) {
-        Link[k].GenCostDer = Link_GenCostDer(k, MainVolume);
+        Links[k].GenCostDer = Link_GenCostDer(k, MainVolume);
     }
 }
 
@@ -4058,7 +4058,7 @@ double TotalLinkCost(double* Volume) {
     double Sum = 0;
 
     for (k = 1; k <= number_of_links; k++)
-        Sum += Link[k].GenCost * Volume[k];
+        Sum += Links[k].GenCost * Volume[k];
     return Sum;
 }
 
@@ -4169,7 +4169,7 @@ int Read_ODflow(double* TotalODflow, int* number_of_modes, int* no_zones) {
         zone_outbound_link_size[n] = 0;
     }
     for (int k = 1; k <= number_of_links; k++) {
-        int from_node_id = Link[k].external_from_node_id;
+        int from_node_id = Links[k].external_from_node_id;
         if (from_node_id <= *no_zones) {
             zone_outbound_link_size[from_node_id] += 1; // from_node_id is the zone_id;
         }
@@ -4202,7 +4202,7 @@ int Read_ODflow(double* TotalODflow, int* number_of_modes, int* no_zones) {
 void CloseLinks(void) {
     int Node;
     free(zone_outbound_link_size);
-    free(Link);
+    free(Links);
     free(FirstLinkFrom);
     free(LastLinkFrom);
 }
@@ -4413,6 +4413,7 @@ int g_ParserIntSequence(std::string str, std::vector<int>& vect) {
 
     return vect.size();
 }
+
 int read_vehicle_file(vector<shared_ptr<CAgent_Simu>>& agents) {
     CDTACSVParser parser_vehicle;
     int count = 0;
@@ -4454,7 +4455,7 @@ int read_vehicle_file(vector<shared_ptr<CAgent_Simu>>& agents) {
             float arrival_time = departure_time;
             for (int l = 0; l < path_sequence.size(); l++) {
                 int link_id = agent->path_link_sequence[l];
-                arrival_time += Link[link_id].FreeTravelTime;
+                arrival_time += Links[link_id].FreeTravelTime;
                 agent->path_time_sequence.push_back(arrival_time);
             }
 
@@ -4526,12 +4527,12 @@ private:
 
     void processSignalizedIntersections() {
         for (int link = 0; link < numLinks; ++link) {
-            if (!Link[link].timing_arc_flag)
+            if (!Links[link].timing_arc_flag)
                 continue;
 
-            int cycleLength = Link[link].cycle_length;
-            int startGreen = Link[link].start_green_time;
-            int endGreen = Link[link].end_green_time;
+            int cycleLength = Links[link].cycle_length;
+            int startGreen = Links[link].start_green_time;
+            int endGreen = Links[link].end_green_time;
 
             if (endGreen < startGreen) {
                 endGreen += cycleLength;
@@ -4547,9 +4548,9 @@ private:
         for (int cycle = 0; cycle < numCycles; ++cycle) {
             for (int t = cycle * cycleLength + startGreen; t <= cycle * cycleLength + endGreen; t++) {
 
-                float saturationFlow = Link[link].Lane_SaturationFlowRate * Link[link].lanes / 3600.0;
+                float saturationFlow = Links[link].Lane_SaturationFlowRate * Links[link].lanes / 3600.0;
 
-                state.linkOutFlowCapacity[link][t] = (t % 2 == 0) ? Link[link].lanes : 0;
+                state.linkOutFlowCapacity[link][t] = (t % 2 == 0) ? Links[link].lanes : 0;
                 state.linkOutFlowState[link][t] = 1;
             }
         }
@@ -4662,12 +4663,12 @@ public:
                 ss << ", ";
             }
 
-            int from_node = Link[link_id].internal_from_node_id;
+            int from_node = Links[link_id].internal_from_node_id;
             ss << g_node_vector[from_node].x << " " << g_node_vector[from_node].y;
 
             // Add to node only for the last link
             if (link_id == path_link_sequence.back()) {
-                int to_node = Link[link_id].internal_to_node_id;
+                int to_node = Links[link_id].internal_to_node_id;
                 ss << ", " << g_node_vector[to_node].x << " " << g_node_vector[to_node].y;
             }
 
@@ -4720,7 +4721,7 @@ public:
 
     void setupLink_queue() {
         for (int l = 1; l <= num_links; l++) {
-            link_queues[l].setup(Link[l]);
+            link_queues[l].setup(Links[l]);
         }
     }
 
@@ -5487,13 +5488,13 @@ void mapmatchingAPI() {
 
     for (int k = 1; k <= number_of_links; k++) {
         double from_x, from_y, to_x, to_y;
-        from_x = g_node_vector[Link[k].internal_from_node_id].x;
-        from_y = g_node_vector[Link[k].internal_to_node_id].y;
-        to_x = g_node_vector[Link[k].internal_from_node_id].x;
-        to_y = g_node_vector[Link[k].internal_to_node_id].y;
+        from_x = g_node_vector[Links[k].internal_from_node_id].x;
+        from_y = g_node_vector[Links[k].internal_to_node_id].y;
+        to_x = g_node_vector[Links[k].internal_from_node_id].x;
+        to_y = g_node_vector[Links[k].internal_to_node_id].y;
 
         mmLinks.push_back(
-            MMLink({from_x, from_y}, {to_x, to_y}, Link[k].internal_from_node_id, Link[k].internal_to_node_id));
+            MMLink({from_x, from_y}, {to_x, to_y}, Links[k].internal_from_node_id, Links[k].internal_to_node_id));
     }
 
     // Compute overall boundaries from all MMLink endpoints.
@@ -5617,7 +5618,7 @@ void mapmatchingAPI() {
                            CurrentNode, Orig);
                     break;
                 }
-                CurrentNode = Link[k].internal_from_node_id;
+                CurrentNode = Links[k].internal_from_node_id;
 
                 if (CurrentNode <= 0 || CurrentNode > no_nodes) {
                     printf("A problem in All_or_Nothing_Assign() Invalid node seq no %d Orig zone = %d \n\n",

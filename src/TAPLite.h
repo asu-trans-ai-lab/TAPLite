@@ -9,7 +9,6 @@
 
 extern "C" TAPLITE_API void DTA_AssignmentAPI();
 extern "C" TAPLITE_API void DTA_SimulationAPI();
-extern "C" TAPLITE_API void mapmatchingAPI();
 
 #include <algorithm>
 #include <cctype>
