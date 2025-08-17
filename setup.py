@@ -33,7 +33,7 @@ setup(
     url='https://github.com/asu-trans-ai-lab/TAPLite',
     packages=[_package_name],
     package_dir={_package_name: _package_name},
-    # package_data={_package_name: ['bin/*']},
+    package_data={_package_name: ['*.dll', '*.dylib', '*.so']},
     license='Apache License 2.0',
     classifiers=[
         'Programming Language :: Python :: 3',

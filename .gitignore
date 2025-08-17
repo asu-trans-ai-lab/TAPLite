@@ -2,7 +2,9 @@ build
 .DS_Store
 .vscode
 .cache
+.coverage
 taplite.egg-info
+__pycache__
 
 logfile.txt
 summary_log_file.txt

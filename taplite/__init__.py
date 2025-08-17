@@ -5,4 +5,4 @@ __version__ = '0.1.0'
 
 
 # print out the current version
-print(f'path4gmns, version {__version__}\n')
+print(f'taplite, version {__version__}\n')
