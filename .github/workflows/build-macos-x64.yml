@@ -27,5 +27,5 @@ jobs:
       - name: "Build"
         run: |
           rm -rf build 
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_EXE=OFF
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_EXE=OFF -DCMAKE_CXX_COMPILER=g++-11
           cmake --build build
