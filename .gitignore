@@ -10,4 +10,5 @@ logfile.txt
 summary_log_file.txt
 *log.csv
 *link_performance*.csv
+*route_assignment.csv
 *columns.csv
