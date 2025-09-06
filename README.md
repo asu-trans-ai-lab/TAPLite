@@ -9,14 +9,15 @@ TAPLite is a lightweight traffic assignment engine for networks encoded in GMNS.
 pip install taplite
 ```
 
-### One-Time Call
+### Traffic Assignment
+#### One-Time Call
 ```python
 import taplite as tap
 
 tap.assignment()
 ```
 
-### Recursive Call
+#### Recursive Call
 ```python
 import taplite as tap
 from multiprocessing import freeze_support
