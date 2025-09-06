@@ -2834,6 +2834,7 @@ int AssignmentAPI() {
             ComputeAccessibilityAndODCosts_v2("od_performance.csv");
         }
 
+        Close();
         return 0;
     }
 

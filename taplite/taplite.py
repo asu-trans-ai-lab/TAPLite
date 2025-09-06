@@ -1,6 +1,7 @@
 import ctypes
 import os
 import platform
+from multiprocessing import Process
 
 
 __all__ = ['assignment', 'simulation']
@@ -28,7 +29,9 @@ except OSError:
 
 
 def assignment():
-    _lib.DTA_AssignmentAPI()
+    proc_assignment = Process(target=_lib.DTA_AssignmentAPI())
+    proc_assignment.start()
+    proc_assignment.join()
 
 
 def simulation():
