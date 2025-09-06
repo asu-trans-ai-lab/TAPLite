@@ -5,6 +5,7 @@ build
 .coverage
 taplite.egg-info
 __pycache__
+dist
 
 logfile.txt
 summary_log_file.txt
