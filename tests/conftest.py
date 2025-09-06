@@ -1,12 +1,12 @@
 import pytest
 
-from os import getcwd, chdir
+from os import getcwd
 from os.path import join
 from shutil import copytree
 
 
 ORIG_CWD = getcwd()
-SRC_DATA_DIR = join(ORIG_CWD, 'data/03_Chicago_sketch')
+SRC_DATA_DIR = join(ORIG_CWD, 'data/03_chicago_sketch')
 
 
 @pytest.fixture(scope="session")

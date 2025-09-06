@@ -4,7 +4,7 @@ import platform
 from multiprocessing import Process
 
 
-__all__ = ['assignment', 'simulation']
+__all__ = ['assignment']
 
 
 _os = platform.system()
@@ -32,7 +32,3 @@ def assignment():
     proc_assignment = Process(target=_lib.DTA_AssignmentAPI())
     proc_assignment.start()
     proc_assignment.join()
-
-
-def simulation():
-    _lib.DTA_SimulationAPI()

@@ -1,6 +1,6 @@
 # TAPLite
 
-TAPLite is a lightweight traffic assignment and simulation engine for networks encoded in GMNS.
+TAPLite is a lightweight traffic assignment engine for networks encoded in GMNS.
 
 ## Quick Start
 
@@ -9,16 +9,14 @@ TAPLite is a lightweight traffic assignment and simulation engine for networks e
 pip install taplite
 ```
 
-### Traffic Assignment
-
-#### One-Time Call
+### One-Time Call
 ```python
 import taplite as tap
 
 tap.assignment()
 ```
 
-#### Recursive Call
+### Recursive Call
 ```python
 import taplite as tap
 from multiprocessing import freeze_support
@@ -30,15 +28,6 @@ if __name__ == '__main__':
         tap.assignment()
 ```
 
-### Traffic Simulation
-
-Note that assignment() must be invoked in the same code block prior to simulation().
-```python
-import taplite as tap
-
-tap.assignment()
-tap.simulation()
-```
 ## Build TAPLite from Scratch
 
 **1. Build the C++ Shared Library**

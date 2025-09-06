@@ -1820,7 +1820,7 @@ void OutputRouteDetails(const std::string& filename, std::vector<double> theta) 
     if (linkIndices.size() == 0)
         return;
     // Write the CSV header in lowercase
-    outputFile << "mode,route_id,o_zone_id,d_zone_id,unique_route_id,prob,node_ids,link_ids,distance_mile,total_"
+    outputFile << "id, mode,route_id,o_zone_id,d_zone_id,unique_route_id,prob,node_ids,link_ids,distance_mile,total_"
                   "distance_km,total_free_flow_travel_time,total_travel_time,route_key,seed_od_volume,target_od_volume,"
                   "final_est_od_volume,volume,";
 
@@ -1832,6 +1832,7 @@ void OutputRouteDetails(const std::string& filename, std::vector<double> theta) 
                           "route_id,node_ids,link_ids,total_distance_mile,total_distance_km,total_free_flow_travel_"
                           "time,total_travel_time,route_volume,\n";
 
+    int global_id = 1;
     for (int m = 1; m < linkIndices.size(); ++m) {
         for (int Orig = 1; Orig < linkIndices[m].size(); ++Orig) {
             for (int Dest = 1; Dest < linkIndices[m][Orig].size(); ++Dest) {
@@ -1947,7 +1948,7 @@ void OutputRouteDetails(const std::string& filename, std::vector<double> theta) 
                         if (!cleanedLinkIDsStr.empty() && cleanedLinkIDsStr.back() == ';')
                             cleanedLinkIDsStr.pop_back();
 
-                        outputFile << g_mode_type_vector[m].mode_type.c_str() << "," << rd.firstRouteID
+                        outputFile << global_id++ << "," << g_mode_type_vector[m].mode_type.c_str() << "," << rd.unique_route_id
                                    << "," // or route_id (the first candidate id)
                                    << org_origin_zone << "," << org_dest_zone << "," << rd.unique_route_id << ","
                                    << accumulatedTheta << "," << rd.nodeIDsStr << "," << cleanedLinkIDsStr
