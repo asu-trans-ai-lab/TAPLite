@@ -1,10 +1,12 @@
 # TAPLite
 
-TAPLite is a lightweight traffic assignment engine for networks encoded in GMNS.
+TAPLite is a lightweight traffic assignment engine for networks encoded in GMNS. It features a special implementation of the Frank-Wofle algorithm that traces paths for each valid OD pair.
 
 ## Quick Start
 
 ### Installation
+TAPLite is available on [PyPI](https://pypi.org/project/taplite/).
+
 ```bash
 pip install taplite
 ```
