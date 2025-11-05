@@ -7,11 +7,11 @@ taplite.egg-info
 __pycache__
 dist
 
+build_config.h
 logfile.txt
 summary_log_file.txt
 *log.csv
 *link_performance*.csv
-*route_assignment.csv
 *columns.csv
 data/03_chicago_sketch/demand.csv
 data/03_chicago_sketch/google_maps_od_distance.csv
