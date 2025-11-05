@@ -13,3 +13,13 @@ summary_log_file.txt
 *link_performance*.csv
 *route_assignment.csv
 *columns.csv
+data/03_chicago_sketch/demand.csv
+data/03_chicago_sketch/google_maps_od_distance.csv
+data/03_chicago_sketch/link.csv
+data/03_chicago_sketch/mode_type.csv
+data/03_chicago_sketch/node.csv
+data/03_chicago_sketch/od_performance.csv
+data/03_chicago_sketch/sample_mode_type.csv
+data/03_chicago_sketch/sample_settings.csv
+data/03_chicago_sketch/settings.csv
+data/03_chicago_sketch/summary_log_file.txt
